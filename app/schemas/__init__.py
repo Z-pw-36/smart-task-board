@@ -11,6 +11,14 @@ from app.schemas.task import (
     TaskParticipantResponse,
     TaskStatusLogResponse,
 )
+from app.schemas.task_board import (
+    AvailableActionsResponse,
+    DashboardSummaryResponse,
+    InboxItemResponse,
+    PaginatedInboxResponse,
+    PaginatedTaskBoardResponse,
+    TaskBoardSummaryResponse,
+)
 from app.schemas.task_node import (
     NodeActionResponse,
     TaskNodeDependencyDraftRequest,
@@ -24,14 +32,20 @@ from app.schemas.task_node import (
 
 __all__ = [
     "AIExtractionRecordSummaryResponse",
+    "AvailableActionsResponse",
     "CreateTaskRequest",
+    "DashboardSummaryResponse",
     "ErrorDetail",
     "ErrorResponse",
+    "InboxItemResponse",
     "NodeActionResponse",
     "PaginatedTaskStatusLogResponse",
+    "PaginatedInboxResponse",
+    "PaginatedTaskBoardResponse",
     "ReturnTaskRequest",
     "TaskActionRequest",
     "TaskActionResponse",
+    "TaskBoardSummaryResponse",
     "TaskDetailResponse",
     "TaskNodeDependencyDraftRequest",
     "TaskNodeDependencyResponse",

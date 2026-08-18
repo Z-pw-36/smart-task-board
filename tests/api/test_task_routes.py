@@ -326,22 +326,73 @@ def test_openapi_and_swagger_expose_only_approved_contract(route_context) -> Non
     assert openapi_response.status_code == 200
     assert docs_response.status_code == 200
     specification = openapi_response.json()
-    phase5_paths = {
-        path: operations
-        for path, operations in specification["paths"].items()
+    api_operations = {
+        (method.upper(), path)
+        for path, path_item in specification["paths"].items()
         if path.startswith("/api/v1")
+        for method in path_item
+        if method in {"get", "post", "put", "patch", "delete"}
     }
-    assert len(phase5_paths) == 16
-    for operations in phase5_paths.values():
-        for operation in operations.values():
-            header_names = {
-                parameter["name"]
-                for parameter in operation.get("parameters", [])
-                if parameter["in"] == "header"
-            }
-            assert "X-Employee-No" in header_names
-            assert "401" in operation["responses"]
-            assert "422" in operation["responses"]
+    phase5_operations = {
+        ("POST", "/api/v1/tasks"),
+        ("GET", "/api/v1/tasks/{task_id}"),
+        ("GET", "/api/v1/tasks/{task_id}/nodes"),
+        ("GET", "/api/v1/tasks/{task_id}/nodes/{node_id}"),
+        ("GET", "/api/v1/tasks/{task_id}/status-logs"),
+        ("POST", "/api/v1/tasks/{task_id}/actions/submit-for-confirmation"),
+        ("POST", "/api/v1/tasks/{task_id}/actions/confirm-and-send"),
+        ("POST", "/api/v1/tasks/{task_id}/actions/confirm-self-assigned"),
+        ("POST", "/api/v1/tasks/{task_id}/actions/accept"),
+        ("POST", "/api/v1/tasks/{task_id}/actions/return"),
+        ("POST", "/api/v1/tasks/{task_id}/actions/resend"),
+        ("POST", "/api/v1/tasks/{task_id}/actions/submit-completion"),
+        ("POST", "/api/v1/tasks/{task_id}/actions/approve-completion"),
+        ("POST", "/api/v1/tasks/{task_id}/nodes/{node_id}/actions/start"),
+        ("PATCH", "/api/v1/tasks/{task_id}/nodes/{node_id}/progress"),
+        ("POST", "/api/v1/tasks/{task_id}/nodes/{node_id}/actions/complete"),
+    }
+    batch1_operations = {
+        ("GET", "/api/v1/auth/prototype-users"),
+        ("POST", "/api/v1/auth/prototype-login"),
+        ("GET", "/api/v1/me"),
+        ("GET", "/api/v1/tasks"),
+        ("GET", "/api/v1/tasks/inbox"),
+        ("GET", "/api/v1/dashboard/summary"),
+        ("GET", "/api/v1/tasks/{task_id}/available-actions"),
+    }
+    assert len(phase5_operations) == 16
+    assert phase5_operations <= api_operations
+    assert batch1_operations <= api_operations
+    assert len(
+        {path for path in specification["paths"] if path.startswith("/api/v1")}
+    ) == 22
+    assert len(api_operations) == 23
+
+    security_schemes = specification["components"]["securitySchemes"]
+    bearer_schemes = {
+        name
+        for name, scheme in security_schemes.items()
+        if scheme.get("type") == "http" and scheme.get("scheme") == "bearer"
+    }
+    assert len(bearer_schemes) == 1
+    bearer_scheme = next(iter(bearer_schemes))
+    public_operations = {
+        ("GET", "/api/v1/auth/prototype-users"),
+        ("POST", "/api/v1/auth/prototype-login"),
+    }
+    for method, path in api_operations:
+        operation = specification["paths"][path][method.lower()]
+        header_names = {
+            parameter["name"]
+            for parameter in operation.get("parameters", [])
+            if parameter["in"] == "header"
+        }
+        assert "Authorization" not in header_names
+        assert "X-Employee-No" not in header_names
+        if (method, path) in public_operations:
+            assert not operation.get("security")
+        else:
+            assert {bearer_scheme: []} in operation["security"]
 
     serialized = openapi_response.text
     assert "pending_confirmation" in serialized
@@ -349,5 +400,6 @@ def test_openapi_and_swagger_expose_only_approved_contract(route_context) -> Non
     assert "ErrorResponse" in serialized
     assert "reject-completion" not in serialized
     assert "reopen-node" not in serialized
+    assert "retry-node" not in serialized
     assert "postgresql" not in serialized.lower()
     assert "password" not in serialized.lower()

@@ -1,10 +1,13 @@
 from collections.abc import Callable
 from typing import Annotated
 
-from fastapi import Depends, Header
+from fastapi import Depends, Request, Security
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
 from app.api.errors import AuthenticationRequiredError
+from app.core.config import get_settings
+from app.core.security import InvalidPrototypeTokenError, decode_access_token
 from app.db.session import SessionLocal, get_db
 from app.db.unit_of_work import UnitOfWork
 from app.services.task_node_workflow import TaskNodeWorkflowService
@@ -12,22 +15,37 @@ from app.services.task_query import TaskQueryService
 from app.services.task_workflow import TaskWorkflowService
 
 UowFactory = Callable[[], UnitOfWork]
+prototype_bearer = HTTPBearer(
+    auto_error=False,
+    bearerFormat="JWT",
+    description="Short-lived JWT for isolated prototype use only.",
+)
 
 
 def get_current_employee_no(
-    x_employee_no: Annotated[
-        str | None,
-        Header(
-            alias="X-Employee-No",
-            description=(
-                "Prototype internal identity only; this is not secure authentication."
-            ),
-        ),
+    request: Request,
+    credentials: Annotated[
+        HTTPAuthorizationCredentials | None,
+        Security(prototype_bearer),
     ] = None,
 ) -> str:
-    if x_employee_no is None or not x_employee_no.strip():
-        raise AuthenticationRequiredError
-    return x_employee_no.strip()
+    settings = get_settings()
+    if "authorization" in request.headers:
+        if credentials is None or credentials.scheme.casefold() != "bearer":
+            raise AuthenticationRequiredError
+        token = credentials.credentials.strip()
+        if not token:
+            raise AuthenticationRequiredError
+        try:
+            return decode_access_token(token, settings)
+        except InvalidPrototypeTokenError as exc:
+            raise AuthenticationRequiredError from exc
+
+    if settings.allow_test_employee_header:
+        employee_no = request.headers.get("X-Employee-No")
+        if employee_no is not None and employee_no.strip():
+            return employee_no.strip()
+    raise AuthenticationRequiredError
 
 
 def get_uow_factory() -> UowFactory:
@@ -50,3 +68,19 @@ def get_task_query_service(
     session: Annotated[Session, Depends(get_db)],
 ) -> TaskQueryService:
     return TaskQueryService(session)
+
+
+def get_identity_service(
+    session: Annotated[Session, Depends(get_db)],
+):
+    from app.services.identity import IdentityService
+
+    return IdentityService(session)
+
+
+def get_task_board_query_service(
+    session: Annotated[Session, Depends(get_db)],
+):
+    from app.services.task_board_query import TaskBoardQueryService
+
+    return TaskBoardQueryService(session)
