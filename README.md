@@ -13,7 +13,7 @@ Phase 0～5 后端基础已经完成：
 - Phase 4：任务和节点状态机 Service。
 - Phase 5：16条核心 REST API 业务路径，包括创建、查询、确认、发送、接受或退回、节点执行、完成提交和验收。
 
-Batch 1 已经实现基础原型身份、任务列表、统一 Inbox、Dashboard 首页摘要、后端授权动作投影和 React 响应式前端。目前后端核心业务闭环已经跑通，正在进行 Batch 1 最终验收；Batch 1 尚未建立正式 Git checkpoint。
+Batch 1 已经实现基础原型身份、任务列表、统一 Inbox、Dashboard 首页摘要、后端授权动作投影和 React 响应式前端，并已通过全部质量门。Batch 1 Git checkpoint 已经建立，`main` 分支及 Phase 0～5、Batch 1 两个基线标签均已上传至 GitHub 私有仓库。当前尚未进入 Batch 2；下一阶段是 Batch 2“任务进度汇报与卡点管理”的只读设计审查。
 
 ## 当前已实现能力
 
@@ -217,10 +217,18 @@ npm.cmd run build
 
 ## Git checkpoint状态
 
-- Phase 0～5 基线 commit：`9a228cdd624339b964d21cff92e3f2533efd8275`
-- Phase 0～5 基线 tag：`phase-5-rest-api-baseline`
-- Batch 1 当前尚未创建正式 checkpoint。
-- 当前未执行 `git push`，不要把本地代码描述为已经上传到远程仓库。
+- Phase 0～5 基线：
+  - commit：`9a228cdd624339b964d21cff92e3f2533efd8275`
+  - tag：`phase-5-rest-api-baseline`
+- Batch 1 稳定基线：
+  - commit：`637106a172d5c10d54461b2a1f910fb5fee9d0df`
+  - tag：`batch-1-task-board-baseline`
+- 远程仓库：`https://github.com/Z-pw-36/smart-task-board.git`
+- `main` 已同步到 `origin/main`，两个稳定基线标签均已上传至 GitHub 私有仓库。
+
+## 后续计划
+
+Batch 1 已经完成，Batch 2 尚未实施。Batch 2 拟实现任务进度汇报与卡点管理，但必须先完成只读设计审查；本次 README 状态同步不代表 Batch 2 已经开始。
 
 ## 当前未实现
 
