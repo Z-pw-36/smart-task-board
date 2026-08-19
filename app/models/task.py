@@ -22,9 +22,11 @@ from app.db.base import Base
 if TYPE_CHECKING:
     from app.models.ai_extraction_record import AIExtractionRecord
     from app.models.department import Department
+    from app.models.task_issue import TaskIssue
     from app.models.task_node import TaskNode
     from app.models.task_node_dependency import TaskNodeDependency
     from app.models.task_participant import TaskParticipant
+    from app.models.task_progress_report import TaskProgressReport
     from app.models.task_status_log import TaskStatusLog
     from app.models.user import User
 
@@ -57,6 +59,12 @@ class Task(Base):
         CheckConstraint(
             "task_version >= 1",
             name="ck_tasks_task_version_positive",
+        ),
+        CheckConstraint(
+            "report_cycle IS NULL OR report_cycle ~ "
+            "'^weekly:(MON|TUE|WED|THU|FRI|SAT|SUN)@"
+            "([01][0-9]|2[0-3]):[0-5][0-9]$'",
+            name="ck_tasks_report_cycle_format",
         ),
     )
 
@@ -215,6 +223,19 @@ class Task(Base):
     ai_extraction_records: Mapped[list[AIExtractionRecord]] = relationship(
         back_populates="task",
         foreign_keys="AIExtractionRecord.task_id",
+    )
+    progress_reports: Mapped[list[TaskProgressReport]] = relationship(
+        back_populates="task",
+        foreign_keys="TaskProgressReport.task_id",
+        order_by=(
+            "(TaskProgressReport.created_at, "
+            "TaskProgressReport.progress_report_id)"
+        ),
+    )
+    issues: Mapped[list[TaskIssue]] = relationship(
+        back_populates="task",
+        foreign_keys="TaskIssue.task_id",
+        order_by="(TaskIssue.created_at, TaskIssue.issue_id)",
     )
     merged_into_task: Mapped[Task | None] = relationship(
         back_populates="merged_from_tasks",

@@ -5,7 +5,7 @@ from app.db.base import Base
 from app.models import AIExtractionRecord, Task, TaskInput
 
 
-def test_phase_1e_metadata_contains_only_approved_business_tables() -> None:
+def test_batch_2a_metadata_contains_only_approved_business_tables() -> None:
     assert set(Base.metadata.tables) == {
         "ai_extraction_records",
         "departments",
@@ -14,7 +14,9 @@ def test_phase_1e_metadata_contains_only_approved_business_tables() -> None:
         "task_node_participants",
         "task_nodes",
         "task_participants",
+        "task_progress_reports",
         "task_status_logs",
+        "task_issues",
         "tasks",
         "users",
     }
@@ -22,8 +24,6 @@ def test_phase_1e_metadata_contains_only_approved_business_tables() -> None:
         "boards",
         "workspaces",
         "projects",
-        "task_progress_reports",
-        "task_issues",
         "task_change_requests",
         "task_completion_reviews",
         "performance_metrics",

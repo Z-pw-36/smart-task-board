@@ -138,7 +138,8 @@ def _constraint_signatures(table: sa.Table) -> set[tuple[object, ...]]:
 
 def _model_index_signatures() -> set[tuple[object, ...]]:
     signatures: set[tuple[object, ...]] = set()
-    for table in Base.metadata.tables.values():
+    for table_name in EXPECTED_TABLES:
+        table = Base.metadata.tables[table_name]
         for index in table.indexes:
             where = index.dialect_options["postgresql"].get("where")
             signatures.add(
@@ -173,14 +174,16 @@ def _migration_index_signatures(
 def test_initial_migration_is_the_only_importable_root_revision() -> None:
     files = _migration_files()
 
-    assert len(files) == 1
-    module = _load_migration(files[0])
-    assert module.revision
-    assert module.down_revision is None
-    assert module.branch_labels is None
-    assert module.depends_on is None
-    assert callable(module.upgrade)
-    assert callable(module.downgrade)
+    assert len(files) == 2
+    modules = [_load_migration(path) for path in files]
+    roots = [module for module in modules if module.down_revision is None]
+    assert len(roots) == 1
+    root = roots[0]
+    assert root.revision == "17f69ea12754"
+    assert root.branch_labels is None
+    assert root.depends_on is None
+    assert callable(root.upgrade)
+    assert callable(root.downgrade)
 
 
 def test_initial_migration_creates_and_drops_exact_tables_in_safe_order() -> None:
@@ -216,9 +219,16 @@ def test_initial_migration_constraints_match_model_metadata() -> None:
     _, recorder = _record_migration()
 
     for table_name in EXPECTED_TABLES:
-        assert _constraint_signatures(recorder.metadata.tables[table_name]) == (
-            _constraint_signatures(Base.metadata.tables[table_name])
-        )
+        model_signatures = _constraint_signatures(Base.metadata.tables[table_name])
+        if table_name == "tasks":
+            model_signatures = {
+                signature
+                for signature in model_signatures
+                if signature[1] != "ck_tasks_report_cycle_format"
+            }
+        assert _constraint_signatures(
+            recorder.metadata.tables[table_name]
+        ) == model_signatures
 
     dependencies = recorder.metadata.tables["task_node_dependencies"]
     dependency_foreign_keys = {

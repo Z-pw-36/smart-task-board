@@ -11,9 +11,11 @@ from sqlalchemy import (
 
 from app.models import (
     Task,
+    TaskIssue,
     TaskNode,
     TaskNodeDependency,
     TaskNodeParticipant,
+    TaskProgressReport,
     User,
 )
 
@@ -170,9 +172,11 @@ def test_task_node_relationships_are_bidirectional_and_safe() -> None:
 
     assert set(relationships.keys()) == {
         "incoming_dependencies",
+        "issues",
         "outgoing_dependencies",
         "owner",
         "participants",
+        "progress_reports",
         "task",
     }
     assert relationships.task.back_populates == "nodes"
@@ -185,6 +189,12 @@ def test_task_node_relationships_are_bidirectional_and_safe() -> None:
     assert relationships.incoming_dependencies.mapper.class_ is TaskNodeDependency
     assert relationships.participants.back_populates == "node"
     assert relationships.participants.mapper.class_ is TaskNodeParticipant
+    assert relationships.progress_reports.back_populates == "node"
+    assert relationships.progress_reports.mapper.class_ is TaskProgressReport
+    assert relationships.progress_reports.viewonly is True
+    assert relationships.issues.back_populates == "node"
+    assert relationships.issues.mapper.class_ is TaskIssue
+    assert relationships.issues.viewonly is True
 
     for relationship in relationships:
         assert "delete" not in relationship.cascade

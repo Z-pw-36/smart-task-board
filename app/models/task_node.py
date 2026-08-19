@@ -22,8 +22,10 @@ from app.db.base import Base
 
 if TYPE_CHECKING:
     from app.models.task import Task
+    from app.models.task_issue import TaskIssue
     from app.models.task_node_dependency import TaskNodeDependency
     from app.models.task_node_participant import TaskNodeParticipant
+    from app.models.task_progress_report import TaskProgressReport
     from app.models.user import User
 
 
@@ -152,4 +154,24 @@ class TaskNode(Base):
         foreign_keys=(
             "[TaskNodeParticipant.task_id, TaskNodeParticipant.node_id]"
         ),
+    )
+    progress_reports: Mapped[list[TaskProgressReport]] = relationship(
+        back_populates="node",
+        primaryjoin=(
+            "and_(TaskNode.task_id == foreign(TaskProgressReport.task_id), "
+            "TaskNode.node_id == foreign(TaskProgressReport.node_id))"
+        ),
+        foreign_keys=(
+            "[TaskProgressReport.task_id, TaskProgressReport.node_id]"
+        ),
+        viewonly=True,
+    )
+    issues: Mapped[list[TaskIssue]] = relationship(
+        back_populates="node",
+        primaryjoin=(
+            "and_(TaskNode.task_id == foreign(TaskIssue.task_id), "
+            "TaskNode.node_id == foreign(TaskIssue.node_id))"
+        ),
+        foreign_keys="[TaskIssue.task_id, TaskIssue.node_id]",
+        viewonly=True,
     )

@@ -3,9 +3,11 @@ from sqlalchemy import String, UniqueConstraint, inspect
 from app.models import (
     Task,
     TaskInput,
+    TaskIssue,
     TaskNode,
     TaskNodeParticipant,
     TaskParticipant,
+    TaskProgressReport,
     TaskStatusLog,
     User,
 )
@@ -78,15 +80,21 @@ def test_user_relationships_are_bidirectional_unambiguous_and_safe() -> None:
 
     assert set(relationships.keys()) == {
         "department",
+        "closed_task_issues",
         "direct_reports",
         "manager",
+        "owned_task_issues",
         "owned_task_nodes",
         "operated_task_status_logs",
         "assigned_tasks",
         "created_tasks",
         "reporting_tasks",
+        "reported_task_issues",
+        "rejected_task_issues",
+        "resolved_task_issues",
         "review_tasks",
         "submitted_task_inputs",
+        "submitted_progress_reports",
         "task_node_participations",
         "task_participations",
         "targeted_task_status_logs",
@@ -149,10 +157,37 @@ def test_user_relationships_are_bidirectional_unambiguous_and_safe() -> None:
             remote_column
         }
 
+    issue_relationships = {
+        "reported_task_issues": ("reported_by", "reported_by_employee_no"),
+        "owned_task_issues": ("owner", "owner_employee_no"),
+        "resolved_task_issues": ("resolved_by", "resolved_by_employee_no"),
+        "rejected_task_issues": ("rejected_by", "rejected_by_employee_no"),
+        "closed_task_issues": ("closed_by", "closed_by_employee_no"),
+    }
+    for relationship_name, (back_populates, remote_column) in (
+        issue_relationships.items()
+    ):
+        relationship = relationships[relationship_name]
+        assert relationship.back_populates == back_populates
+        assert relationship.uselist is True
+        assert relationship.mapper.class_ is TaskIssue
+        assert {column.name for column in relationship.remote_side} == {
+            remote_column
+        }
+
+    progress_reports = relationships.submitted_progress_reports
+    assert progress_reports.back_populates == "reporter"
+    assert progress_reports.uselist is True
+    assert progress_reports.mapper.class_ is TaskProgressReport
+    assert {column.name for column in progress_reports.remote_side} == {
+        "reporter_employee_no"
+    }
+
     for relationship_name in (
         "department",
         "manager",
         "direct_reports",
+        "closed_task_issues",
         "submitted_task_inputs",
         "created_tasks",
         "assigned_tasks",
@@ -160,6 +195,11 @@ def test_user_relationships_are_bidirectional_unambiguous_and_safe() -> None:
         "review_tasks",
         "owned_task_nodes",
         "operated_task_status_logs",
+        "owned_task_issues",
+        "reported_task_issues",
+        "rejected_task_issues",
+        "resolved_task_issues",
+        "submitted_progress_reports",
         "task_node_participations",
         "task_participations",
         "targeted_task_status_logs",

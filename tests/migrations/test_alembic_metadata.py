@@ -18,7 +18,9 @@ EXPECTED_TABLES = {
     "task_node_participants",
     "task_nodes",
     "task_participants",
+    "task_progress_reports",
     "task_status_logs",
+    "task_issues",
     "tasks",
     "users",
 }

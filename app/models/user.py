@@ -12,9 +12,11 @@ if TYPE_CHECKING:
     from app.models.department import Department
     from app.models.task import Task
     from app.models.task_input import TaskInput
+    from app.models.task_issue import TaskIssue
     from app.models.task_node import TaskNode
     from app.models.task_node_participant import TaskNodeParticipant
     from app.models.task_participant import TaskParticipant
+    from app.models.task_progress_report import TaskProgressReport
     from app.models.task_status_log import TaskStatusLog
 
 
@@ -99,4 +101,28 @@ class User(Base):
     targeted_task_status_logs: Mapped[list[TaskStatusLog]] = relationship(
         back_populates="target_employee",
         foreign_keys="TaskStatusLog.target_employee_no",
+    )
+    submitted_progress_reports: Mapped[list[TaskProgressReport]] = relationship(
+        back_populates="reporter",
+        foreign_keys="TaskProgressReport.reporter_employee_no",
+    )
+    reported_task_issues: Mapped[list[TaskIssue]] = relationship(
+        back_populates="reported_by",
+        foreign_keys="TaskIssue.reported_by_employee_no",
+    )
+    owned_task_issues: Mapped[list[TaskIssue]] = relationship(
+        back_populates="owner",
+        foreign_keys="TaskIssue.owner_employee_no",
+    )
+    resolved_task_issues: Mapped[list[TaskIssue]] = relationship(
+        back_populates="resolved_by",
+        foreign_keys="TaskIssue.resolved_by_employee_no",
+    )
+    rejected_task_issues: Mapped[list[TaskIssue]] = relationship(
+        back_populates="rejected_by",
+        foreign_keys="TaskIssue.rejected_by_employee_no",
+    )
+    closed_task_issues: Mapped[list[TaskIssue]] = relationship(
+        back_populates="closed_by",
+        foreign_keys="TaskIssue.closed_by_employee_no",
     )

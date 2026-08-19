@@ -16,9 +16,11 @@ from app.models import (
     AIExtractionRecord,
     Department,
     Task,
+    TaskIssue,
     TaskNode,
     TaskNodeDependency,
     TaskParticipant,
+    TaskProgressReport,
     TaskStatusLog,
     User,
 )
@@ -165,6 +167,7 @@ def test_task_defaults_numeric_types_and_check_constraints() -> None:
         "ck_tasks_actual_hours_non_negative",
         "ck_tasks_estimated_hours_non_negative",
         "ck_tasks_not_merged_into_self",
+        "ck_tasks_report_cycle_format",
         "ck_tasks_task_version_positive",
         "ck_tasks_task_weight_range",
     }
@@ -181,6 +184,10 @@ def test_task_defaults_numeric_types_and_check_constraints() -> None:
     assert "task_version >= 1" in check_constraints[
         "ck_tasks_task_version_positive"
     ]
+    report_cycle_check = check_constraints["ck_tasks_report_cycle_format"]
+    assert "weekly:" in report_cycle_check
+    assert "MON|TUE|WED|THU|FRI|SAT|SUN" in report_cycle_check
+    assert "([01][0-9]|2[0-3]):[0-5][0-9]" in report_cycle_check
 
 
 def test_task_timestamp_columns_are_timezone_aware_with_utc_defaults() -> None:
@@ -249,12 +256,14 @@ def test_task_relationships_are_explicit_bidirectional_and_safe() -> None:
         "ai_extraction_records",
         "creator",
         "department",
+        "issues",
         "main_assignee",
         "merged_from_tasks",
         "merged_into_task",
         "node_dependencies",
         "nodes",
         "participants",
+        "progress_reports",
         "report_to",
         "reviewer",
         "status_logs",
@@ -302,6 +311,19 @@ def test_task_relationships_are_explicit_bidirectional_and_safe() -> None:
     assert relationships.ai_extraction_records.back_populates == "task"
     assert relationships.ai_extraction_records.mapper.class_ is AIExtractionRecord
     assert relationships.ai_extraction_records.uselist is True
+    assert relationships.progress_reports.back_populates == "task"
+    assert relationships.progress_reports.mapper.class_ is TaskProgressReport
+    assert relationships.progress_reports.uselist is True
+    assert tuple(
+        expression.name for expression in relationships.progress_reports.order_by
+    ) == ("created_at", "progress_report_id")
+    assert relationships.issues.back_populates == "task"
+    assert relationships.issues.mapper.class_ is TaskIssue
+    assert relationships.issues.uselist is True
+    assert tuple(expression.name for expression in relationships.issues.order_by) == (
+        "created_at",
+        "issue_id",
+    )
     assert relationships.merged_into_task.back_populates == "merged_from_tasks"
     assert relationships.merged_into_task.uselist is False
     assert {column.name for column in relationships.merged_into_task.remote_side} == {
