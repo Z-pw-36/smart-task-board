@@ -31,4 +31,38 @@ describe("InboxPage", () => {
 
     expect(await screen.findByText("任务已被其他操作更新，请刷新后重试。")).toBeInTheDocument();
   });
+
+  it("posts issue inbox actions to the issue action endpoint", async () => {
+    const issueItem = {
+      inbox_item_type: "task_issue",
+      action_code: "handle_issue",
+      task: taskSummary,
+      node: null,
+      reason: "Issue needs attention",
+      expected_task_version: 4,
+      endpoint: "/api/v1/tasks/22222222-2222-4222-8222-222222222222/issues/44444444-4444-4444-8444-444444444444/actions",
+      allowed_actions: ["start_processing_issue"],
+      is_overdue: false,
+      relevant_at: "2026-08-18T09:00:00Z",
+    };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ items: [issueItem], limit: 20, offset: 0, total: 1 }))
+      .mockResolvedValueOnce(jsonResponse({ status: "processing" }))
+      .mockResolvedValue(jsonResponse({ items: [], limit: 20, offset: 0, total: 0 }));
+    vi.stubGlobal("fetch", fetchMock);
+    renderPage(<InboxPage />);
+    const user = userEvent.setup();
+
+    const inboxCard = await screen.findByRole("article");
+    await user.click(within(inboxCard).getByRole("button"));
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "http://localhost:8000/api/v1/tasks/22222222-2222-4222-8222-222222222222/issues/44444444-4444-4444-8444-444444444444/actions/start-processing",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ expected_task_version: 4 }),
+      }),
+    );
+  });
 });

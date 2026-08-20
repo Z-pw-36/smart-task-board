@@ -1,7 +1,20 @@
 import { apiRequest } from "./client";
 import type { AllowedAction } from "./types";
 
-const actionPaths: Record<Exclude<AllowedAction, "start_node" | "update_node_progress" | "complete_node">, string> = {
+export type TaskLifecycleAction = Exclude<
+  AllowedAction,
+  | "start_node"
+  | "update_node_progress"
+  | "complete_node"
+  | "submit_progress_report"
+  | "report_task_issue"
+  | "start_processing_issue"
+  | "resolve_issue"
+  | "reject_issue"
+  | "close_issue"
+>;
+
+const actionPaths: Record<TaskLifecycleAction, string> = {
   submit_for_confirmation: "submit-for-confirmation",
   confirm_and_send: "confirm-and-send",
   confirm_self_assigned: "confirm-self-assigned",
@@ -24,11 +37,24 @@ export const actionLabels: Record<AllowedAction, string> = {
   complete_node: "完成节点",
   submit_completion: "提交验收",
   approve_completion: "通过验收",
+  submit_progress_report: "提交进度汇报",
+  report_task_issue: "上报卡点",
+  start_processing_issue: "开始处理",
+  resolve_issue: "标记已解决",
+  reject_issue: "驳回问题",
+  close_issue: "确认关闭",
+};
+
+const issueActionPaths: Partial<Record<AllowedAction, string>> = {
+  start_processing_issue: "start-processing",
+  resolve_issue: "resolve",
+  reject_issue: "reject",
+  close_issue: "close",
 };
 
 export async function runTaskAction(
   taskId: string,
-  action: Exclude<AllowedAction, "start_node" | "update_node_progress" | "complete_node">,
+  action: TaskLifecycleAction,
   version: number,
   reason?: string,
 ): Promise<void> {
@@ -65,11 +91,16 @@ export async function runInboxAction(
   reason?: string,
   progressPercent?: number,
 ): Promise<void> {
-  await apiRequest(endpoint, {
+  const issueActionPath = issueActionPaths[action];
+  await apiRequest(issueActionPath ? `${endpoint}/${issueActionPath}` : endpoint, {
     method: action === "update_node_progress" ? "PATCH" : "POST",
     body: JSON.stringify({
       expected_task_version: version,
-      ...(action === "return" ? { reason } : {}),
+      ...(
+        action === "return" || (issueActionPath && action !== "start_processing_issue")
+          ? { reason }
+          : {}
+      ),
       ...(action === "update_node_progress" ? { progress_percent: progressPercent } : {}),
     }),
   });

@@ -10,6 +10,9 @@ from app.core.config import get_settings
 from app.core.security import InvalidPrototypeTokenError, decode_access_token
 from app.db.session import SessionLocal, get_db
 from app.db.unit_of_work import UnitOfWork
+from app.services.progress_issue_query import ProgressIssueQueryService
+from app.services.progress_report import ProgressReportService
+from app.services.task_issue import TaskIssueService
 from app.services.task_node_workflow import TaskNodeWorkflowService
 from app.services.task_query import TaskQueryService
 from app.services.task_workflow import TaskWorkflowService
@@ -62,6 +65,24 @@ def get_task_node_workflow_service(
     uow_factory: Annotated[UowFactory, Depends(get_uow_factory)],
 ) -> TaskNodeWorkflowService:
     return TaskNodeWorkflowService(uow_factory)
+
+
+def get_progress_report_service(
+    uow_factory: Annotated[UowFactory, Depends(get_uow_factory)],
+) -> ProgressReportService:
+    return ProgressReportService(uow_factory)
+
+
+def get_task_issue_service(
+    uow_factory: Annotated[UowFactory, Depends(get_uow_factory)],
+) -> TaskIssueService:
+    return TaskIssueService(uow_factory)
+
+
+def get_progress_issue_query_service(
+    session: Annotated[Session, Depends(get_db)],
+) -> ProgressIssueQueryService:
+    return ProgressIssueQueryService(session)
 
 
 def get_task_query_service(

@@ -34,7 +34,7 @@ pytestmark = pytest.mark.postgresql
 EXPECTED_DATABASE = "smarttaskboard_core_test"
 EXPECTED_HOST = "127.0.0.1"
 EXPECTED_PORT = 46479
-EXPECTED_REVISION = "17f69ea12754"
+EXPECTED_REVISION = "576787492bd1"
 EXPECTED_TABLES = {
     "ai_extraction_records",
     "departments",
@@ -43,6 +43,8 @@ EXPECTED_TABLES = {
     "task_node_participants",
     "task_nodes",
     "task_participants",
+    "task_progress_reports",
+    "task_issues",
     "task_status_logs",
     "tasks",
     "users",
@@ -533,6 +535,8 @@ def test_batch1_real_bearer_task_board_workflow_and_cleanup(
                 "in_progress_count": 0,
                 "due_within_7_days_count": 0,
                 "overdue_count": 0,
+                "report_due_count": 0,
+                "open_issue_count": 0,
                 "due_window_days": 7,
                 "recent_tasks": [],
             }
@@ -648,12 +652,23 @@ def test_batch1_real_bearer_task_board_workflow_and_cleanup(
                 UUID(item["node_id"]): item["allowed_actions"]
                 for item in in_progress_actions.json()["nodes"]
             }
-            assert action_nodes == {alpha_nodes[0]: ["start_node"], alpha_nodes[1]: []}
+            assert action_nodes == {
+                alpha_nodes[0]: [
+                    "start_node",
+                    "submit_progress_report",
+                    "report_task_issue",
+                ],
+                alpha_nodes[1]: ["submit_progress_report", "report_task_issue"],
+            }
             assert collaborator_actions.json()["allowed_actions"] == []
-            assert all(
-                not item["allowed_actions"]
+            collaborator_node_actions = {
+                UUID(item["node_id"]): item["allowed_actions"]
                 for item in collaborator_actions.json()["nodes"]
-            )
+            }
+            assert collaborator_node_actions == {
+                alpha_nodes[0]: ["submit_progress_report", "report_task_issue"],
+                alpha_nodes[1]: [],
+            }
 
             node1_started = client.post(
                 f"/api/v1/tasks/{alpha_id}/nodes/{alpha_nodes[0]}/actions/start",

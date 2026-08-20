@@ -64,7 +64,7 @@ def error_client() -> Iterator[TestClient]:
         yield client
 
 
-@pytest.mark.parametrize("index,error", enumerate(ERRORS))
+@pytest.mark.parametrize("index,error", tuple(enumerate(ERRORS)))
 def test_business_error_mapping(
     error_client: TestClient,
     index: int,

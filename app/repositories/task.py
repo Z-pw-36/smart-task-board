@@ -4,7 +4,7 @@ from uuid import UUID
 from sqlalchemy import Select, and_, exists, false, func, or_, select
 from sqlalchemy.orm import Session
 
-from app.models import Task, TaskNode, TaskNodeParticipant, TaskParticipant
+from app.models import Task, TaskIssue, TaskNode, TaskNodeParticipant, TaskParticipant
 
 
 class TaskRepository:
@@ -62,6 +62,13 @@ class TaskRepository:
             exists().where(
                 TaskNodeParticipant.task_id == Task.task_id,
                 TaskNodeParticipant.employee_no == employee_no,
+            ),
+            exists().where(
+                TaskIssue.task_id == Task.task_id,
+                or_(
+                    TaskIssue.reported_by_employee_no == employee_no,
+                    TaskIssue.owner_employee_no == employee_no,
+                ),
             ),
         )
 
@@ -181,6 +188,19 @@ class TaskRepository:
             .where(predicate)
             .order_by(Task.updated_at.desc(), Task.task_id)
             .limit(limit)
+        )
+        return list(self.session.execute(statement).scalars().all())
+
+    def list_report_due_candidates(self, employee_no: str) -> list[Task]:
+        statement = (
+            select(Task)
+            .where(
+                Task.status == "in_progress",
+                Task.main_assignee_employee_no == employee_no,
+                Task.report_cycle.is_not(None),
+                Task.accepted_at.is_not(None),
+            )
+            .order_by(Task.deadline.asc().nulls_last(), Task.task_id)
         )
         return list(self.session.execute(statement).scalars().all())
 

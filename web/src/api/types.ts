@@ -18,7 +18,13 @@ export type AllowedAction =
   | "update_node_progress"
   | "complete_node"
   | "submit_completion"
-  | "approve_completion";
+  | "approve_completion"
+  | "submit_progress_report"
+  | "report_task_issue"
+  | "start_processing_issue"
+  | "resolve_issue"
+  | "reject_issue"
+  | "close_issue";
 
 export interface PrototypeUser {
   employee_no: string;
@@ -102,8 +108,70 @@ export interface DashboardSummary {
   in_progress_count: number;
   due_within_7_days_count: number;
   overdue_count: number;
+  report_due_count: number;
+  open_issue_count: number;
   due_window_days: number;
   recent_tasks: TaskSummary[];
+}
+
+export interface ProgressReport {
+  progress_report_id: string;
+  task_id: string;
+  node_id: string | null;
+  reporter_employee_no: string;
+  progress_percent: number;
+  report_content: string;
+  stage_result: string | null;
+  difficulty: string | null;
+  resource_request: string | null;
+  actual_hours: string | null;
+  corrects_report_id: string | null;
+  report_period_start: string | null;
+  report_period_end: string | null;
+  task_version: number;
+  operation_source: string;
+  created_at: string;
+}
+
+export interface ProgressReportPage {
+  items: ProgressReport[];
+  limit: number;
+  offset: number;
+  total: number;
+}
+
+export type IssueAction = "start_processing" | "resolve" | "reject" | "close";
+
+export interface TaskIssue {
+  issue_id: string;
+  task_id: string;
+  node_id: string | null;
+  source_progress_report_id: string | null;
+  reported_by_employee_no: string;
+  issue_type: string;
+  title: string;
+  description: string;
+  requested_resource: string | null;
+  severity: string;
+  status: "open" | "processing" | "resolved" | "rejected" | "closed";
+  owner_employee_no: string;
+  resolution_note: string | null;
+  resolved_by_employee_no: string | null;
+  rejected_by_employee_no: string | null;
+  closed_by_employee_no: string | null;
+  created_at: string;
+  processing_started_at: string | null;
+  resolved_at: string | null;
+  rejected_at: string | null;
+  closed_at: string | null;
+  allowed_actions: IssueAction[];
+}
+
+export interface TaskIssuePage {
+  items: TaskIssue[];
+  limit: number;
+  offset: number;
+  total: number;
 }
 
 export interface TaskNode {

@@ -71,3 +71,37 @@ class CreateTaskDraftCommand:
     dependencies: tuple[TaskNodeDependencyDraft, ...] = ()
     node_participants: tuple[TaskNodeParticipantDraft, ...] = ()
     extraction_record_ids: tuple[UUID, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class SubmitProgressReportCommand:
+    task_id: UUID
+    reporter_employee_no: str
+    expected_task_version: int
+    operation_source: str
+    progress_percent: int
+    report_content: str
+    node_id: UUID | None = None
+    stage_result: str | None = None
+    difficulty: str | None = None
+    resource_request: str | None = None
+    actual_hours: Decimal | None = None
+    corrects_report_id: UUID | None = None
+    progress_report_id: UUID = field(default_factory=uuid4)
+
+
+@dataclass(frozen=True, slots=True)
+class CreateTaskIssueCommand:
+    task_id: UUID
+    reported_by_employee_no: str
+    expected_task_version: int
+    operation_source: str
+    issue_type: str
+    title: str
+    description: str
+    severity: str
+    owner_employee_no: str
+    node_id: UUID | None = None
+    source_progress_report_id: UUID | None = None
+    requested_resource: str | None = None
+    issue_id: UUID = field(default_factory=uuid4)

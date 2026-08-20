@@ -10,6 +10,7 @@ from app.services.errors import (
     DependencyNotSatisfiedError,
     EntityNotFoundError,
     InvalidStateTransitionError,
+    OpenTaskIssueConflictError,
     PermissionDeniedError,
 )
 from app.services.task_workflow import (
@@ -47,7 +48,7 @@ class TaskNodeWorkflowService:
                 raise InvalidStateTransitionError(
                     "start_node requires a pending task node"
                 )
-            self._require_node_actor(task, node, actor_employee_no)
+            self._require_node_actor(uow, task, node, actor_employee_no)
             for dependency in uow.task_nodes.list_predecessors(task_id, node_id):
                 predecessor = uow.task_nodes.get_node(
                     dependency.predecessor_node_id
@@ -96,7 +97,7 @@ class TaskNodeWorkflowService:
                 raise InvalidStateTransitionError(
                     "progress updates require an in-progress task node"
                 )
-            self._require_node_actor(task, node, actor_employee_no)
+            self._require_node_actor(uow, task, node, actor_employee_no)
             if progress_percent < node.progress_percent:
                 raise BusinessValidationError("node progress cannot decrease")
             if (
@@ -141,7 +142,11 @@ class TaskNodeWorkflowService:
                 raise InvalidStateTransitionError(
                     "complete_node requires an in-progress task node"
                 )
-            self._require_node_actor(task, node, actor_employee_no)
+            self._require_node_actor(uow, task, node, actor_employee_no)
+            if uow.task_issues.has_active_blocker(task.task_id, node.node_id):
+                raise OpenTaskIssueConflictError(
+                    "active blocker issues must be closed before completing the node"
+                )
             now = _aware_utc(self._clock(), "clock")
             node.progress_percent = 100
             node.status = "completed"
@@ -173,10 +178,23 @@ class TaskNodeWorkflowService:
 
     @staticmethod
     def _require_node_actor(
+        uow: UnitOfWork,
         task: Task,
         node: TaskNode,
         actor_employee_no: str,
     ) -> None:
-        expected_actor = node.owner_employee_no or task.main_assignee_employee_no
-        if expected_actor is None or actor_employee_no != expected_actor:
-            raise PermissionDeniedError("actor cannot execute this task node")
+        if actor_employee_no in {
+            task.main_assignee_employee_no,
+            node.owner_employee_no,
+        }:
+            return
+        if any(
+            participant.employee_no == actor_employee_no
+            and participant.participant_role == "owner"
+            for participant in uow.task_nodes.list_participants(
+                task.task_id,
+                node.node_id,
+            )
+        ):
+            return
+        raise PermissionDeniedError("actor cannot execute this task node")

@@ -21,6 +21,7 @@ from app.services.errors import (
     BusinessValidationError,
     EntityNotFoundError,
     InvalidStateTransitionError,
+    OpenTaskIssueConflictError,
     PermissionDeniedError,
     TaskVersionConflictError,
 )
@@ -543,6 +544,10 @@ class TaskWorkflowService:
                 raise BusinessValidationError("task must have at least one node")
             if any(node.status != "completed" for node in nodes):
                 raise BusinessValidationError("all task nodes must be completed")
+            if uow.task_issues.has_non_closed(task.task_id):
+                raise OpenTaskIssueConflictError(
+                    "all task issues must be closed before submitting completion"
+                )
             now = _aware_utc(self._clock(), "clock")
             task.status = TASK_PENDING_REVIEW
             _increment_task(task, now)

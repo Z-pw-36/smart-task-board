@@ -8,7 +8,9 @@ from sqlalchemy.orm import Session
 from app.repositories import (
     AIExtractionRecordRepository,
     DepartmentRepository,
+    ProgressReportRepository,
     TaskInputRepository,
+    TaskIssueRepository,
     TaskNodeRepository,
     TaskRepository,
     TaskStatusLogRepository,
@@ -39,6 +41,8 @@ class UnitOfWork:
         self.ai_extraction_records = AIExtractionRecordRepository(self.session)
         self.tasks = TaskRepository(self.session)
         self.task_nodes = TaskNodeRepository(self.session)
+        self.progress_reports = ProgressReportRepository(self.session)
+        self.task_issues = TaskIssueRepository(self.session)
         self.task_status_logs = TaskStatusLogRepository(self.session)
         return self
 

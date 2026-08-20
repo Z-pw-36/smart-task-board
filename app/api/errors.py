@@ -12,6 +12,7 @@ from app.services.errors import (
     DependencyNotSatisfiedError,
     EntityNotFoundError,
     InvalidStateTransitionError,
+    OpenTaskIssueConflictError,
     PermissionDeniedError,
     TaskVersionConflictError,
     WorkflowError,
@@ -48,6 +49,7 @@ _WORKFLOW_ERRORS: dict[type[WorkflowError], tuple[int, str]] = {
     BusinessValidationError: (422, "business_validation_error"),
     DependencyNotSatisfiedError: (409, "dependency_not_satisfied"),
     DependencyCycleError: (422, "dependency_cycle"),
+    OpenTaskIssueConflictError: (409, "open_task_issue_conflict"),
 }
 
 

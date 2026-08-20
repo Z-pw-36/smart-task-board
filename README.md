@@ -13,7 +13,7 @@ Phase 0～5 后端基础已经完成：
 - Phase 4：任务和节点状态机 Service。
 - Phase 5：16条核心 REST API 业务路径，包括创建、查询、确认、发送、接受或退回、节点执行、完成提交和验收。
 
-Batch 1 已经实现基础原型身份、任务列表、统一 Inbox、Dashboard 首页摘要、后端授权动作投影和 React 响应式前端，并已通过全部质量门。Batch 1 Git checkpoint 已经建立，`main` 分支及 Phase 0～5、Batch 1 两个基线标签均已上传至 GitHub 私有仓库。当前尚未进入 Batch 2；下一阶段是 Batch 2“任务进度汇报与卡点管理”的只读设计审查。
+Batch 1 已经实现基础原型身份、任务列表、统一 Inbox、Dashboard 首页摘要、后端授权动作投影和 React 响应式前端，并已通过全部质量门。Batch 2A 已新增进度汇报和任务卡点模型及迁移，本地 checkpoint 为 `94108af17225ca9e4a2f728e47a117f1d546a0af`；由于当前 GitHub 网络不可达，该提交尚未推送。Batch 2B 的 Repository、Service、REST API 和 React 功能已经实现，并已在独立 PostgreSQL 16 验收库完成迁移往返、19 项集成测试和零残留复验；本地 checkpoint 尚待安全确认后创建。
 
 ## 当前已实现能力
 
@@ -24,12 +24,17 @@ Batch 1 已经实现基础原型身份、任务列表、统一 Inbox、Dashboard
 - 节点开始、进度更新和完成，任务提交完成及验收通过。
 - 当前用户任务列表、任务详情、节点查询和状态日志查询。
 - 统一 Inbox、Dashboard 首页摘要和由后端计算的 `allowed_actions`。
+- 任务级和节点级不可变进度汇报、追加式汇报更正、周期待汇报查询。
+- 卡点、资源需求、协同支持和风险上报，以及 `open → processing/resolved/rejected → closed` 生命周期。
+- 活动 blocker 禁止完成对应节点；任何未关闭卡点禁止提交任务验收。
 - 后端在业务 Service 中继续校验身份、权限、状态和 `task_version`；前端按钮不是权限边界。
 
 React 前端：
 
 - 原型登录页、Dashboard 首页、任务列表、Inbox、新建任务和任务详情。
 - 创建任务节点及依赖关系，执行当前后端已支持的任务和节点动作。
+- 任务详情中的进度汇报、汇报历史、更正入口、卡点创建和卡点处理。
+- Inbox 待汇报入口，以及 Dashboard 待汇报和待处理卡点指标。
 - 桌面端和移动端响应式导航与布局。
 
 ## 技术栈
@@ -46,7 +51,7 @@ React 前端：
 
 ## 数据库与迁移
 
-当前 SQLAlchemy Metadata 精确包含10张业务表：
+当前 SQLAlchemy Metadata 精确包含12张业务表：
 
 ```text
 users
@@ -59,12 +64,15 @@ task_nodes
 task_node_participants
 task_node_dependencies
 task_status_logs
+task_progress_reports
+task_issues
 ```
 
-当前只有一份初始迁移，Alembic head 为 `17f69ea12754`：
+当前有两份不可重写的迁移，Alembic head 为 `576787492bd1`：
 
 ```text
 alembic/versions/17f69ea12754_initial_schema.py
+alembic/versions/576787492bd1_add_progress_reports_and_task_issues.py
 ```
 
 不要手工创建或修改业务表，应通过 Alembic 管理结构变更。Docker Compose 中的 PostgreSQL 数据通过 `./data/postgres:/var/lib/postgresql/data` 绑定到项目目录，不使用默认命名卷。
@@ -77,6 +85,7 @@ alembic/versions/17f69ea12754_initial_schema.py
 → 确认并发送
 → 主承办人接受或退回
 → 节点开始、更新进度和完成
+→ 进度汇报、卡点上报与闭环处理
 → 主承办人提交完成
 → 验收人确认完成
 ```
@@ -213,7 +222,7 @@ npm.cmd run test -- --run
 npm.cmd run build
 ```
 
-当前 Batch 1 最终验收基线为：后端 `202 passed, 18 skipped, 1 warning`，前端 `8 test files / 15 tests passed`。这是当前工作区的一次验证结果，不是永久固定的测试数量。唯一已知警告是 FastAPI/Starlette `TestClient` 的 `StarletteDeprecationWarning`。
+当前 Batch 2B 完整质量门为：后端 `264 passed, 0 skipped, 0 warnings`（包含独立 PostgreSQL 16 上真实执行的19项集成测试），前端 `9 test files / 19 tests passed`。`pip check`、`pip-audit`、Alembic check 与 downgrade/upgrade、SQLAlchemy mapper、ESLint、TypeScript、Vite build、OpenAPI 授权与 operation ID 检查均已通过，测试后业务数据残留为零。测试客户端已迁移到 Starlette 推荐的 `httpx2`，不再产生旧 `httpx` 弃用警告。
 
 ## Git checkpoint状态
 
@@ -223,12 +232,15 @@ npm.cmd run build
 - Batch 1 稳定基线：
   - commit：`637106a172d5c10d54461b2a1f910fb5fee9d0df`
   - tag：`batch-1-task-board-baseline`
+- Batch 2A 本地基线：
+  - commit：`94108af17225ca9e4a2f728e47a117f1d546a0af`
+  - push：待 GitHub 网络恢复
 - 远程仓库：`https://github.com/Z-pw-36/smart-task-board.git`
-- `main` 已同步到 `origin/main`，两个稳定基线标签均已上传至 GitHub 私有仓库。
+- 两个稳定基线标签均已上传至 GitHub 私有仓库且不得移动；本地 `main` 当前领先 `origin/main`。
 
 ## 后续计划
 
-Batch 1 已经完成，Batch 2 尚未实施。Batch 2 拟实现任务进度汇报与卡点管理，但必须先完成只读设计审查；本次 README 状态同步不代表 Batch 2 已经开始。
+Batch 1、Batch 2A 和 Batch 2B 功能与验收均已完成。Batch 2B 本地 checkpoint 待安全确认后创建；功能开发继续进入完成验收与返工、任务变更、组织权限、绩效、负荷、优先级等后续 Wave。
 
 ## 当前未实现
 
@@ -238,8 +250,8 @@ Batch 1 已经完成，Batch 2 尚未实施。Batch 2 拟实现任务进度汇�
 - AI 结构化提取、真实 AI/LLM、多轮对话、语音上传和 ASR。
 - 企业微信机器人、通知和 Outbox。
 - 附件及交付物文件管理。
-- 进度汇报、负荷分析、逾期分析、冲突分析、优先级分析和绩效关联。
-- 归档复用，以及 Batch 2 和后续任务看板功能。
+- 负荷分析、冲突分析、优先级分析和绩效关联。
+- 归档复用、任务变更、通知提醒，以及 Batch 2 后续任务看板功能。
 
 ## 有效需求文档
 

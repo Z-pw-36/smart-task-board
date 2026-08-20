@@ -10,6 +10,7 @@ from app.services import (
     BusinessValidationError,
     CreateTaskDraftCommand,
     InvalidStateTransitionError,
+    OpenTaskIssueConflictError,
     PermissionDeniedError,
     TaskNodeDependencyDraft,
     TaskNodeDraft,
@@ -70,6 +71,7 @@ def _workflow_context(
     uow.tasks.find_participant.return_value = participant or _participant(task)
     uow.task_nodes.list_nodes.return_value = nodes or []
     uow.task_nodes.list_dependencies.return_value = []
+    uow.task_issues.has_non_closed.return_value = False
     uow.task_status_logs.add.side_effect = lambda value: value
     return TaskWorkflowService(Mock(return_value=uow), clock=lambda: NOW), uow
 
@@ -368,6 +370,26 @@ def test_completion_requires_all_nodes_completed() -> None:
     service, uow = _workflow_context(task, nodes=[node])
 
     with pytest.raises(BusinessValidationError, match="completed"):
+        service.submit_completion(task.task_id, "ASSIGNEE", 4, "unit-test")
+
+    assert (task.status, task.task_version) == ("in_progress", 4)
+    uow.commit.assert_not_called()
+
+
+def test_completion_requires_every_issue_to_be_closed() -> None:
+    task = _task(status="in_progress", version=4)
+    node = TaskNode(
+        node_id=uuid4(),
+        task_id=task.task_id,
+        node_order=1,
+        node_name="Done",
+        status="completed",
+        progress_percent=100,
+    )
+    service, uow = _workflow_context(task, nodes=[node])
+    uow.task_issues.has_non_closed.return_value = True
+
+    with pytest.raises(OpenTaskIssueConflictError):
         service.submit_completion(task.task_id, "ASSIGNEE", 4, "unit-test")
 
     assert (task.status, task.task_version) == ("in_progress", 4)

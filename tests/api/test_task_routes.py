@@ -360,13 +360,33 @@ def test_openapi_and_swagger_expose_only_approved_contract(route_context) -> Non
         ("GET", "/api/v1/dashboard/summary"),
         ("GET", "/api/v1/tasks/{task_id}/available-actions"),
     }
+    batch2_operations = {
+        ("GET", "/api/v1/tasks/report-due"),
+        ("POST", "/api/v1/tasks/{task_id}/progress-reports"),
+        ("GET", "/api/v1/tasks/{task_id}/progress-reports"),
+        (
+            "GET",
+            "/api/v1/tasks/{task_id}/progress-reports/{progress_report_id}",
+        ),
+        ("POST", "/api/v1/tasks/{task_id}/issues"),
+        ("GET", "/api/v1/tasks/{task_id}/issues"),
+        ("GET", "/api/v1/tasks/{task_id}/issues/{issue_id}"),
+        (
+            "POST",
+            "/api/v1/tasks/{task_id}/issues/{issue_id}/actions/start-processing",
+        ),
+        ("POST", "/api/v1/tasks/{task_id}/issues/{issue_id}/actions/resolve"),
+        ("POST", "/api/v1/tasks/{task_id}/issues/{issue_id}/actions/reject"),
+        ("POST", "/api/v1/tasks/{task_id}/issues/{issue_id}/actions/close"),
+    }
     assert len(phase5_operations) == 16
     assert phase5_operations <= api_operations
     assert batch1_operations <= api_operations
+    assert batch2_operations <= api_operations
     assert len(
         {path for path in specification["paths"] if path.startswith("/api/v1")}
-    ) == 22
-    assert len(api_operations) == 23
+    ) == 31
+    assert len(api_operations) == 34
 
     security_schemes = specification["components"]["securitySchemes"]
     bearer_schemes = {

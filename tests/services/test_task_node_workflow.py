@@ -5,11 +5,12 @@ from uuid import uuid4
 
 import pytest
 
-from app.models import Task, TaskNode, TaskNodeDependency
+from app.models import Task, TaskNode, TaskNodeDependency, TaskNodeParticipant
 from app.services import (
     BusinessValidationError,
     DependencyNotSatisfiedError,
     InvalidStateTransitionError,
+    OpenTaskIssueConflictError,
     PermissionDeniedError,
     TaskNodeWorkflowService,
 )
@@ -51,6 +52,7 @@ def _context(
     uow.tasks.get_by_id_for_update.return_value = task
     uow.task_nodes.get_node.return_value = node
     uow.task_nodes.list_predecessors.return_value = []
+    uow.task_issues.has_active_blocker.return_value = False
     uow.task_status_logs.add.side_effect = lambda value: value
     service = TaskNodeWorkflowService(Mock(return_value=uow), clock=lambda: NOW)
     return service, uow, task, node
@@ -90,9 +92,18 @@ def test_main_assignee_can_execute_ownerless_node() -> None:
 
 def test_node_actor_and_cross_task_are_rejected_without_commit() -> None:
     service, uow, task, node = _context()
+    uow.task_nodes.list_participants.return_value = [
+        TaskNodeParticipant(
+            task_id=task.task_id,
+            node_id=node.node_id,
+            employee_no="COLLABORATOR",
+            participant_role="collaborator",
+        )
+    ]
 
-    with pytest.raises(PermissionDeniedError):
-        service.start_node(task.task_id, node.node_id, "ASSIGNEE", 3, "unit-test")
+    for actor in ("COLLABORATOR", "OUTSIDER"):
+        with pytest.raises(PermissionDeniedError):
+            service.start_node(task.task_id, node.node_id, actor, 3, "unit-test")
     assert task.task_version == 3
     uow.commit.assert_not_called()
 
@@ -185,6 +196,21 @@ def test_complete_node_sets_final_node_fields_and_increments_once() -> None:
 
     with pytest.raises(InvalidStateTransitionError):
         service.complete_node(task.task_id, node.node_id, "OWNER", 4, "unit-test")
+
+
+def test_active_blocker_prevents_node_completion_without_mutation() -> None:
+    service, uow, task, node = _context(node_status="in_progress", progress=80)
+    uow.task_issues.has_active_blocker.return_value = True
+
+    with pytest.raises(OpenTaskIssueConflictError):
+        service.complete_node(task.task_id, node.node_id, "OWNER", 3, "unit-test")
+
+    assert (node.status, node.progress_percent, task.task_version) == (
+        "in_progress",
+        80,
+        3,
+    )
+    uow.commit.assert_not_called()
 
 
 @pytest.mark.parametrize("operation", ["start", "progress", "complete"])

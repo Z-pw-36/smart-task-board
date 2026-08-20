@@ -141,6 +141,8 @@ def test_dashboard_summary_is_current_user_only_and_has_fixed_window(board_conte
         "in_progress_count": 4,
         "due_within_7_days_count": 5,
         "overdue_count": 6,
+        "report_due_count": 7,
+        "open_issue_count": 8,
         "due_window_days": 7,
         "recent_tasks": [],
     }

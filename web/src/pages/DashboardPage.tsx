@@ -24,6 +24,8 @@ export function DashboardPage() {
     ["进行中", data.in_progress_count],
     [`未来 ${data.due_window_days} 天截止`, data.due_within_7_days_count],
     ["已逾期", data.overdue_count],
+    ["待汇报", data.report_due_count],
+    ["待处理卡点", data.open_issue_count],
   ];
   return (
     <div className="page-stack">

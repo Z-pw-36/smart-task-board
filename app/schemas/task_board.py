@@ -17,6 +17,12 @@ type AllowedAction = Literal[
     "complete_node",
     "submit_completion",
     "approve_completion",
+    "submit_progress_report",
+    "report_task_issue",
+    "start_processing_issue",
+    "resolve_issue",
+    "reject_issue",
+    "close_issue",
 ]
 type InboxActionCode = Literal[
     "confirm_task",
@@ -27,6 +33,8 @@ type InboxActionCode = Literal[
     "complete_node",
     "submit_completion",
     "approve_completion",
+    "report_due",
+    "handle_issue",
 ]
 
 
@@ -108,5 +116,7 @@ class DashboardSummaryResponse(StrictSchema):
     in_progress_count: int
     due_within_7_days_count: int
     overdue_count: int
+    report_due_count: int
+    open_issue_count: int
     due_window_days: int = 7
     recent_tasks: list[TaskBoardSummaryResponse]

@@ -28,3 +28,7 @@ class DependencyNotSatisfiedError(WorkflowError):
 
 class DependencyCycleError(WorkflowError):
     """The task node dependency graph contains a directed cycle."""
+
+
+class OpenTaskIssueConflictError(WorkflowError):
+    """An active or unclosed task issue prevents the requested action."""
