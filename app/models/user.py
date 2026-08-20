@@ -11,6 +11,7 @@ from app.db.base import Base
 if TYPE_CHECKING:
     from app.models.department import Department
     from app.models.task import Task
+    from app.models.task_completion_review import TaskCompletionReview
     from app.models.task_input import TaskInput
     from app.models.task_issue import TaskIssue
     from app.models.task_node import TaskNode
@@ -125,4 +126,12 @@ class User(Base):
     closed_task_issues: Mapped[list[TaskIssue]] = relationship(
         back_populates="closed_by",
         foreign_keys="TaskIssue.closed_by_employee_no",
+    )
+    submitted_completion_reviews: Mapped[list[TaskCompletionReview]] = relationship(
+        back_populates="submitted_by",
+        foreign_keys="TaskCompletionReview.submitted_by_employee_no",
+    )
+    assigned_completion_reviews: Mapped[list[TaskCompletionReview]] = relationship(
+        back_populates="reviewer",
+        foreign_keys="TaskCompletionReview.reviewer_employee_no",
     )

@@ -65,4 +65,61 @@ describe("InboxPage", () => {
       }),
     );
   });
+
+  it("navigates completion submit, review, and reopen work to the rich detail flow", async () => {
+    const taskId = taskSummary.task_id;
+    const base = {
+      task: taskSummary,
+      node: null,
+      reason: "Completion work requires detail context",
+      expected_task_version: 4,
+      is_overdue: false,
+      relevant_at: "2026-08-18T09:00:00Z",
+    };
+    const items = [
+      {
+        ...base,
+        inbox_item_type: "submit_completion",
+        action_code: "submit_completion",
+        endpoint: `/api/v1/tasks/${taskId}/actions/submit-completion`,
+        allowed_actions: ["submit_completion"],
+      },
+      {
+        ...base,
+        inbox_item_type: "approve_completion",
+        action_code: "approve_completion",
+        endpoint: `/api/v1/tasks/${taskId}/actions/approve-completion`,
+        allowed_actions: ["approve_completion", "reject_completion"],
+      },
+      {
+        ...base,
+        inbox_item_type: "reopen_node",
+        action_code: "reopen_node",
+        endpoint: `/api/v1/tasks/${taskId}/nodes/node/actions/reopen`,
+        allowed_actions: ["reopen_node"],
+      },
+    ];
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({ items, limit: 20, offset: 0, total: items.length }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    renderPage(<InboxPage />);
+
+    expect(await screen.findByRole("link", { name: "填写完成说明并提交" })).toHaveAttribute(
+      "href",
+      `/tasks/${taskId}`,
+    );
+    expect(screen.getByRole("link", { name: "查看并验收" })).toHaveAttribute(
+      "href",
+      `/tasks/${taskId}`,
+    );
+    expect(screen.getByRole("link", { name: "查看返工要求" })).toHaveAttribute(
+      "href",
+      `/tasks/${taskId}`,
+    );
+    expect(screen.queryByRole("button", { name: "提交验收" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "通过验收" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "重开节点" })).not.toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
 });

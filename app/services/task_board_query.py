@@ -3,12 +3,21 @@ from uuid import UUID
 
 from sqlalchemy.orm import Session
 
-from app.models import Task, TaskNode, TaskNodeDependency, TaskNodeParticipant, TaskParticipant
+from app.models import (
+    Task,
+    TaskCompletionReview,
+    TaskNode,
+    TaskNodeDependency,
+    TaskNodeParticipant,
+    TaskParticipant,
+)
 from app.repositories import (
     ProgressReportRepository,
+    TaskCompletionReviewRepository,
     TaskIssueRepository,
     TaskNodeRepository,
     TaskRepository,
+    TaskStatusLogRepository,
     UserRepository,
 )
 from app.services.errors import EntityNotFoundError, PermissionDeniedError
@@ -24,6 +33,21 @@ def _aware_utc(value: datetime) -> datetime:
     return value.astimezone(UTC)
 
 
+def completion_review_allowed_actions(
+    task: Task,
+    actor: str,
+    current_review: TaskCompletionReview | None,
+) -> list[str]:
+    if (
+        task.status == "pending_review"
+        and current_review is not None
+        and current_review.review_status == "submitted"
+        and actor == current_review.reviewer_employee_no
+    ):
+        return ["approve_completion", "reject_completion"]
+    return []
+
+
 def _task_actions(
     task: Task,
     actor: str,
@@ -31,6 +55,9 @@ def _task_actions(
     *,
     has_non_closed_issue: bool = False,
     is_task_participant: bool = False,
+    current_review: TaskCompletionReview | None = None,
+    latest_review: TaskCompletionReview | None = None,
+    rework_node_reopened: bool = True,
 ) -> list[str]:
     if task.status == "draft" and actor == task.creator_employee_no:
         if task.main_assignee_employee_no is not None and nodes:
@@ -56,15 +83,18 @@ def _task_actions(
         if (
             is_main_assignee
             and nodes
-            and all(node.status == "completed" for node in nodes)
+            and all(node.status == "completed" and node.progress_percent == 100 for node in nodes)
             and not has_non_closed_issue
+            and not (
+                latest_review is not None
+                and latest_review.review_status == "rejected"
+                and latest_review.rework_node_id is not None
+                and not rework_node_reopened
+            )
         ):
             actions.append("submit_completion")
         return actions
-    reviewer = task.reviewer_employee_no or task.creator_employee_no
-    if task.status == "pending_review" and actor == reviewer:
-        return ["approve_completion"]
-    return []
+    return completion_review_allowed_actions(task, actor, current_review)
 
 
 def _node_actions(
@@ -77,14 +107,15 @@ def _node_actions(
     can_execute: bool,
     can_report: bool,
     has_active_blocker: bool,
+    can_reopen: bool = False,
 ) -> list[str]:
     if task.status != "in_progress":
         return []
+    if node.status == "completed" and can_reopen:
+        return ["reopen_node"]
     if not can_execute and not can_report:
         return []
-    shared_actions = (
-        ["submit_progress_report", "report_task_issue"] if can_report else []
-    )
+    shared_actions = ["submit_progress_report", "report_task_issue"] if can_report else []
     if node.status == "pending":
         predecessors = [
             nodes_by_id.get(item.predecessor_node_id)
@@ -111,6 +142,8 @@ class TaskBoardQueryService:
         self._users = UserRepository(session)
         self._reports = ProgressReportRepository(session)
         self._issues = TaskIssueRepository(session)
+        self._completion_reviews = TaskCompletionReviewRepository(session)
+        self._logs = TaskStatusLogRepository(session)
         self._clock = clock
 
     @staticmethod
@@ -125,6 +158,69 @@ class TaskBoardQueryService:
             else None
         )
         return start, end
+
+    def _review_context(
+        self,
+        task_id: UUID,
+    ) -> tuple[
+        TaskCompletionReview | None,
+        TaskCompletionReview | None,
+        bool,
+    ]:
+        current = self._completion_reviews.get_current_submitted(task_id)
+        latest = self._completion_reviews.get_latest(task_id)
+        reopened = True
+        if (
+            latest is not None
+            and latest.review_status == "rejected"
+            and latest.rework_node_id is not None
+        ):
+            reopened = self._logs.has_action_for_business_ref(
+                task_id,
+                "node_reopened",
+                "completion_review",
+                latest.completion_review_id,
+                after_task_version=latest.reviewed_task_version,
+            )
+        return current, latest, reopened
+
+    @staticmethod
+    def _can_reopen_node(
+        task: Task,
+        node: TaskNode,
+        actor: str,
+        latest_review: TaskCompletionReview | None,
+        rework_node_reopened: bool,
+    ) -> bool:
+        return (
+            task.status == "in_progress"
+            and node.status == "completed"
+            and latest_review is not None
+            and latest_review.review_status == "rejected"
+            and latest_review.rework_node_id == node.node_id
+            and latest_review.reviewer_employee_no == actor
+            and not rework_node_reopened
+        )
+
+    def _inbox_task_candidates(self, actor: str) -> list[Task]:
+        tasks = {task.task_id: task for task in self._tasks.list_inbox_candidates(actor)}
+        reviews = [
+            *self._completion_reviews.list_submitted_for_reviewer(actor),
+            *self._completion_reviews.list_rejected_rework_candidates_for_reviewer(actor),
+        ]
+        for review in reviews:
+            if review.task_id in tasks:
+                continue
+            task = self._tasks.get_by_id(review.task_id)
+            if task is not None:
+                tasks[task.task_id] = task
+        return sorted(
+            tasks.values(),
+            key=lambda task: (
+                -_aware_utc(task.updated_at).timestamp(),
+                str(task.task_id),
+            ),
+        )
 
     def list_tasks(
         self,
@@ -165,31 +261,27 @@ class TaskBoardQueryService:
         offset: int,
     ) -> dict[str, object]:
         items: list[dict[str, object]] = []
-        for task in self._tasks.list_inbox_candidates(actor):
-            nodes, dependencies, task_participants, node_participants = self._context(
-                task.task_id
-            )
+        for task in self._inbox_task_candidates(actor):
+            nodes, dependencies, task_participants, node_participants = self._context(task.task_id)
+            current_review, latest_review, rework_node_reopened = self._review_context(task.task_id)
             task_summary = self._summary(task, actor, context=(nodes, dependencies))
             task_actions = _task_actions(
                 task,
                 actor,
                 nodes,
                 has_non_closed_issue=self._issues.has_non_closed(task.task_id),
-                is_task_participant=any(
-                    item.employee_no == actor for item in task_participants
-                ),
+                is_task_participant=any(item.employee_no == actor for item in task_participants),
+                current_review=current_review,
+                latest_review=latest_review,
+                rework_node_reopened=rework_node_reopened,
             )
             if task.status == "pending_confirmation" and task_actions:
                 items.append(
-                    self._inbox_item(
-                        "confirm_task", task, task_summary, None, task_actions
-                    )
+                    self._inbox_item("confirm_task", task, task_summary, None, task_actions)
                 )
             elif task.status == "pending_acceptance" and task_actions:
                 items.append(
-                    self._inbox_item(
-                        "accept_task", task, task_summary, None, task_actions
-                    )
+                    self._inbox_item("accept_task", task, task_summary, None, task_actions)
                 )
             elif task.status == "returned" and task_actions:
                 items.append(
@@ -197,9 +289,7 @@ class TaskBoardQueryService:
                 )
             elif task.status == "pending_review" and task_actions:
                 items.append(
-                    self._inbox_item(
-                        "approve_completion", task, task_summary, None, task_actions
-                    )
+                    self._inbox_item("approve_completion", task, task_summary, None, task_actions)
                 )
             elif task.status == "in_progress":
                 if "submit_completion" in task_actions:
@@ -232,14 +322,19 @@ class TaskBoardQueryService:
                             task.task_id,
                             node.node_id,
                         ),
+                        can_reopen=self._can_reopen_node(
+                            task,
+                            node,
+                            actor,
+                            latest_review,
+                            rework_node_reopened,
+                        ),
                     )
                     for action in node_actions:
                         if action in {"submit_progress_report", "report_task_issue"}:
                             continue
                         code = "update_node" if action == "update_node_progress" else action
-                        items.append(
-                            self._inbox_item(code, task, task_summary, node, [action])
-                        )
+                        items.append(self._inbox_item(code, task, task_summary, node, [action]))
                 period_start, period_end = task_report_period(
                     task.report_cycle,
                     task.accepted_at,
@@ -275,9 +370,7 @@ class TaskBoardQueryService:
             nodes, dependencies, _, _ = self._context(task.task_id)
             node = next((item for item in nodes if item.node_id == issue.node_id), None)
             task_summary = self._summary(task, actor, context=(nodes, dependencies))
-            actions = [
-                f"{action}_issue" for action in issue_allowed_actions(issue, actor)
-            ]
+            actions = [f"{action}_issue" for action in issue_allowed_actions(issue, actor)]
             if not actions:
                 continue
             items.append(
@@ -288,9 +381,7 @@ class TaskBoardQueryService:
                     "node": self._node_summary(node) if node is not None else None,
                     "reason": f"{issue.severity} {issue.issue_type}: {issue.title}",
                     "expected_task_version": task.task_version,
-                    "endpoint": (
-                        f"/api/v1/tasks/{task.task_id}/issues/{issue.issue_id}/actions"
-                    ),
+                    "endpoint": (f"/api/v1/tasks/{task.task_id}/issues/{issue.issue_id}/actions"),
                     "allowed_actions": actions,
                     "is_overdue": task_summary["is_overdue"],
                     "relevant_at": issue.created_at,
@@ -321,6 +412,7 @@ class TaskBoardQueryService:
         if not self._tasks.is_related(task_id, actor):
             raise PermissionDeniedError("actor cannot read this task")
         nodes, dependencies, task_participants, node_participants = self._context(task_id)
+        current_review, latest_review, rework_node_reopened = self._review_context(task_id)
         nodes_by_id = {node.node_id: node for node in nodes}
         return {
             "task_id": task.task_id,
@@ -330,9 +422,10 @@ class TaskBoardQueryService:
                 actor,
                 nodes,
                 has_non_closed_issue=self._issues.has_non_closed(task.task_id),
-                is_task_participant=any(
-                    item.employee_no == actor for item in task_participants
-                ),
+                is_task_participant=any(item.employee_no == actor for item in task_participants),
+                current_review=current_review,
+                latest_review=latest_review,
+                rework_node_reopened=rework_node_reopened,
             ),
             "nodes": [
                 {
@@ -358,6 +451,13 @@ class TaskBoardQueryService:
                         has_active_blocker=self._issues.has_active_blocker(
                             task.task_id,
                             node.node_id,
+                        ),
+                        can_reopen=self._can_reopen_node(
+                            task,
+                            node,
+                            actor,
+                            latest_review,
+                            rework_node_reopened,
                         ),
                     ),
                 }
@@ -385,9 +485,7 @@ class TaskBoardQueryService:
             "created_task_count": self._tasks.count_related(actor, relation="created"),
             "assigned_task_count": self._tasks.count_related(actor, relation="assigned"),
             "inbox_count": inbox_total,
-            "in_progress_count": self._tasks.count_related(
-                actor, task_status="in_progress"
-            ),
+            "in_progress_count": self._tasks.count_related(actor, task_status="in_progress"),
             "due_within_7_days_count": self._tasks.count_related(
                 actor,
                 deadline_from=now,
@@ -434,20 +532,16 @@ class TaskBoardQueryService:
             nodes, dependencies = context
             participants = self._tasks.list_participants(task.task_id)
             node_participants = self._nodes.list_participants_by_task_id(task.task_id)
+        current_review, latest_review, rework_node_reopened = self._review_context(task.task_id)
         employee_nos = tuple(
             item
             for item in {task.creator_employee_no, task.main_assignee_employee_no}
             if item is not None
         )
-        people = {
-            item.employee_no: item
-            for item in self._users.list_by_employee_nos(employee_nos)
-        }
+        people = {item.employee_no: item for item in self._users.list_by_employee_nos(employee_nos)}
         creator = people.get(task.creator_employee_no)
         assignee = (
-            people.get(task.main_assignee_employee_no)
-            if task.main_assignee_employee_no
-            else None
+            people.get(task.main_assignee_employee_no) if task.main_assignee_employee_no else None
         )
         now = _aware_utc(self._clock())
         deadline = _aware_utc(task.deadline) if task.deadline else None
@@ -469,6 +563,11 @@ class TaskBoardQueryService:
             relations.append("node_participant")
         if self._issues.has_employee_relation(task.task_id, actor):
             relations.append("issue_participant")
+        if latest_review is not None:
+            if latest_review.submitted_by_employee_no == actor:
+                relations.append("completion_submitter")
+            if latest_review.reviewer_employee_no == actor:
+                relations.append("completion_reviewer")
         return {
             "task_id": task.task_id,
             "task_no": task.task_no,
@@ -496,9 +595,10 @@ class TaskBoardQueryService:
                 actor,
                 nodes,
                 has_non_closed_issue=self._issues.has_non_closed(task.task_id),
-                is_task_participant=any(
-                    item.employee_no == actor for item in participants
-                ),
+                is_task_participant=any(item.employee_no == actor for item in participants),
+                current_review=current_review,
+                latest_review=latest_review,
+                rework_node_reopened=rework_node_reopened,
             ),
             "is_overdue": is_overdue,
             "days_until_deadline": (
@@ -528,6 +628,7 @@ class TaskBoardQueryService:
             "complete_node": "complete",
             "submit_completion": "submit-completion",
             "approve_completion": "approve-completion",
+            "reopen_node": "reopen",
         }[action_code]
         if action_code == "update_node":
             endpoint += "/progress"
@@ -542,6 +643,7 @@ class TaskBoardQueryService:
             "complete_node": "Task node can be completed.",
             "submit_completion": "All task nodes are completed.",
             "approve_completion": "Task is waiting for completion review.",
+            "reopen_node": "A rejected completion review requires an explicit node reopen.",
         }[action_code]
         return {
             "inbox_item_type": action_code,

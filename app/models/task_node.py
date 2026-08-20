@@ -22,6 +22,7 @@ from app.db.base import Base
 
 if TYPE_CHECKING:
     from app.models.task import Task
+    from app.models.task_completion_review import TaskCompletionReview
     from app.models.task_issue import TaskIssue
     from app.models.task_node_dependency import TaskNodeDependency
     from app.models.task_node_participant import TaskNodeParticipant
@@ -173,5 +174,18 @@ class TaskNode(Base):
             "TaskNode.node_id == foreign(TaskIssue.node_id))"
         ),
         foreign_keys="[TaskIssue.task_id, TaskIssue.node_id]",
+        viewonly=True,
+    )
+    rework_completion_reviews: Mapped[list[TaskCompletionReview]] = relationship(
+        back_populates="rework_node",
+        primaryjoin=(
+            "and_(TaskNode.task_id == foreign(TaskCompletionReview.task_id), "
+            "TaskNode.node_id == "
+            "foreign(TaskCompletionReview.rework_node_id))"
+        ),
+        foreign_keys=(
+            "[TaskCompletionReview.task_id, "
+            "TaskCompletionReview.rework_node_id]"
+        ),
         viewonly=True,
     )

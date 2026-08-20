@@ -19,6 +19,7 @@ from app.models import (
     AIExtractionRecord,
     Department,
     Task,
+    TaskCompletionReview,
     TaskInput,
     TaskNode,
     TaskNodeDependency,
@@ -34,7 +35,7 @@ pytestmark = pytest.mark.postgresql
 EXPECTED_DATABASE = "smarttaskboard_core_test"
 EXPECTED_HOST = "127.0.0.1"
 EXPECTED_PORT = 46479
-EXPECTED_REVISION = "576787492bd1"
+EXPECTED_REVISION = "c31f8e7a4d02"
 EXPECTED_TABLES = {
     "ai_extraction_records",
     "departments",
@@ -43,6 +44,7 @@ EXPECTED_TABLES = {
     "task_node_participants",
     "task_nodes",
     "task_participants",
+    "task_completion_reviews",
     "task_progress_reports",
     "task_issues",
     "task_status_logs",
@@ -128,6 +130,11 @@ def phase5_records(phase5_engine: Engine) -> Iterator[Phase5Records]:
         if task_ids:
             connection.execute(
                 delete(TaskStatusLog).where(TaskStatusLog.task_id.in_(task_ids))
+            )
+            connection.execute(
+                delete(TaskCompletionReview).where(
+                    TaskCompletionReview.task_id.in_(task_ids)
+                )
             )
             connection.execute(
                 delete(TaskNodeDependency).where(TaskNodeDependency.task_id.in_(task_ids))
@@ -323,11 +330,13 @@ def _post_action(
     action: str,
     employee_no: str,
     version: int,
+    **payload: object,
 ):
+    body = {"expected_task_version": version, **payload}
     return client.post(
         f"/api/v1/tasks/{task_id}/actions/{action}",
         headers=_headers(employee_no),
-        json={"expected_task_version": version},
+        json=body,
     )
 
 
@@ -488,13 +497,17 @@ def test_http_core_workflow_and_read_permissions(
         "submit-completion",
         refs.assignee,
         9,
+        completion_note="Core API workflow completed",
+        deliverable_summary="Both API nodes are complete",
     )
+    completion_review_id = completion.json()["review"]["completion_review_id"]
     approved = _post_action(
         phase5_client,
         task_id,
         "approve-completion",
         refs.reviewer,
         10,
+        completion_review_id=completion_review_id,
     )
     assert (completion.json()["status"], completion.json()["task_version"]) == (
         "pending_review",

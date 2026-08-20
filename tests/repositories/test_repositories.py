@@ -323,3 +323,37 @@ def test_status_log_repository_is_append_only_and_orders_timeline_stably() -> No
     assert "LIMIT 1" in latest_sql
     assert not hasattr(repository, "update")
     assert not hasattr(repository, "delete")
+
+
+def test_status_log_repository_checks_exact_business_reference_events() -> None:
+    task_id = uuid4()
+    business_ref_id = uuid4()
+    session = _session_with_result()
+    session.execute.return_value.scalar_one.return_value = True
+    repository = TaskStatusLogRepository(session)
+
+    assert repository.has_action_for_business_ref(
+        task_id,
+        "node_reopened",
+        "task_node",
+        business_ref_id,
+    )
+    event_sql = _executed_sql(session)
+    assert "SELECT EXISTS (SELECT task_status_logs.status_log_id" in event_sql
+    assert f"task_status_logs.task_id = '{task_id}'" in event_sql
+    assert "task_status_logs.action_type = 'node_reopened'" in event_sql
+    assert "task_status_logs.business_ref_type = 'task_node'" in event_sql
+    assert f"task_status_logs.business_ref_id = '{business_ref_id}'" in event_sql
+    assert "task_status_logs.task_version >" not in event_sql
+
+    session.execute.return_value.scalar_one.return_value = False
+    assert not repository.has_action_for_business_ref(
+        task_id,
+        "node_completed",
+        "task_node",
+        business_ref_id,
+        after_task_version=7,
+    )
+    versioned_sql = _executed_sql(session)
+    assert "task_status_logs.action_type = 'node_completed'" in versioned_sql
+    assert "task_status_logs.task_version > 7" in versioned_sql

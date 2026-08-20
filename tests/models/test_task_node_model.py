@@ -11,6 +11,7 @@ from sqlalchemy import (
 
 from app.models import (
     Task,
+    TaskCompletionReview,
     TaskIssue,
     TaskNode,
     TaskNodeDependency,
@@ -177,6 +178,7 @@ def test_task_node_relationships_are_bidirectional_and_safe() -> None:
         "owner",
         "participants",
         "progress_reports",
+        "rework_completion_reviews",
         "task",
     }
     assert relationships.task.back_populates == "nodes"
@@ -195,6 +197,12 @@ def test_task_node_relationships_are_bidirectional_and_safe() -> None:
     assert relationships.issues.back_populates == "node"
     assert relationships.issues.mapper.class_ is TaskIssue
     assert relationships.issues.viewonly is True
+    assert relationships.rework_completion_reviews.back_populates == "rework_node"
+    assert (
+        relationships.rework_completion_reviews.mapper.class_
+        is TaskCompletionReview
+    )
+    assert relationships.rework_completion_reviews.viewonly is True
 
     for relationship in relationships:
         assert "delete" not in relationship.cascade

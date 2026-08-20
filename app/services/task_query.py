@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from app.models import (
     AIExtractionRecord,
     Task,
+    TaskCompletionReview,
     TaskNode,
     TaskNodeDependency,
     TaskNodeParticipant,
@@ -16,6 +17,7 @@ from app.models import (
 )
 from app.repositories import (
     AIExtractionRecordRepository,
+    TaskCompletionReviewRepository,
     TaskNodeRepository,
     TaskRepository,
     TaskStatusLogRepository,
@@ -35,6 +37,7 @@ class TaskQueryService:
         self._tasks = TaskRepository(session)
         self._nodes = TaskNodeRepository(session)
         self._logs = TaskStatusLogRepository(session)
+        self._completion_reviews = TaskCompletionReviewRepository(session)
         self._extractions = AIExtractionRecordRepository(session)
 
     def get_task_detail(self, task_id: UUID, actor_employee_no: str) -> dict[str, Any]:
@@ -47,12 +50,9 @@ class TaskQueryService:
             participants=[self._participant_dict(item) for item in participants],
             nodes=[self._node_dict(item) for item in nodes],
             dependencies=[self._dependency_dict(item) for item in dependencies],
-            node_participants=[
-                self._node_participant_dict(item) for item in node_participants
-            ],
+            node_participants=[self._node_participant_dict(item) for item in node_participants],
             ai_extraction_records=[
-                self._extraction_dict(item)
-                for item in self._extractions.list_by_task_id(task_id)
+                self._extraction_dict(item) for item in self._extractions.list_by_task_id(task_id)
             ],
         )
         return result
@@ -126,6 +126,56 @@ class TaskQueryService:
             "total": self._logs.count_by_task_id(task_id),
         }
 
+    def list_completion_reviews(
+        self,
+        task_id: UUID,
+        actor_employee_no: str,
+        *,
+        limit: int,
+        offset: int,
+    ) -> dict[str, Any]:
+        if not 1 <= limit <= 100:
+            raise BusinessValidationError("limit must be between 1 and 100")
+        if offset < 0:
+            raise BusinessValidationError("offset must not be negative")
+        self._require_task_read_access(task_id, actor_employee_no)
+        items = self._completion_reviews.list_by_task_id(
+            task_id,
+            limit=limit,
+            offset=offset,
+        )
+        return {
+            "items": [self._completion_review_dict(item) for item in items],
+            "limit": limit,
+            "offset": offset,
+            "total": self._completion_reviews.count_by_task_id(task_id),
+        }
+
+    def get_completion_review(
+        self,
+        task_id: UUID,
+        completion_review_id: UUID,
+        actor_employee_no: str,
+    ) -> dict[str, Any]:
+        self._require_task_read_access(task_id, actor_employee_no)
+        review = self._completion_reviews.get_by_id(completion_review_id)
+        if review is None or review.task_id != task_id:
+            raise EntityNotFoundError("completion review was not found")
+        return self._completion_review_dict(review)
+
+    def _require_task_read_access(
+        self,
+        task_id: UUID,
+        actor_employee_no: str,
+    ) -> Task:
+        self._session.expire_all()
+        task = self._tasks.get_by_id(task_id)
+        if task is None:
+            raise EntityNotFoundError("task was not found")
+        if not self._tasks.is_related(task_id, actor_employee_no):
+            raise PermissionDeniedError("actor cannot read this task")
+        return task
+
     def _aggregate(
         self,
         task_id: UUID,
@@ -137,46 +187,12 @@ class TaskQueryService:
         list[TaskNodeDependency],
         list[TaskNodeParticipant],
     ]:
-        self._session.expire_all()
-        task = self._tasks.get_by_id(task_id)
-        if task is None:
-            raise EntityNotFoundError("task was not found")
+        task = self._require_task_read_access(task_id, actor_employee_no)
         participants = self._tasks.list_participants(task_id)
         nodes = self._nodes.list_nodes(task_id)
         dependencies = self._nodes.list_dependencies(task_id)
         node_participants = self._nodes.list_participants_by_task_id(task_id)
-        self._require_read_access(
-            task,
-            participants,
-            nodes,
-            node_participants,
-            actor_employee_no,
-        )
         return task, participants, nodes, dependencies, node_participants
-
-    @staticmethod
-    def _require_read_access(
-        task: Task,
-        participants: list[TaskParticipant],
-        nodes: list[TaskNode],
-        node_participants: list[TaskNodeParticipant],
-        actor_employee_no: str,
-    ) -> None:
-        direct_employees = {
-            task.creator_employee_no,
-            task.main_assignee_employee_no,
-            task.report_to_employee_no,
-            task.reviewer_employee_no,
-        }
-        if actor_employee_no in direct_employees:
-            return
-        if any(item.employee_no == actor_employee_no for item in participants):
-            return
-        if any(item.owner_employee_no == actor_employee_no for item in nodes):
-            return
-        if any(item.employee_no == actor_employee_no for item in node_participants):
-            return
-        raise PermissionDeniedError("actor cannot read this task")
 
     @staticmethod
     def _task_dict(task: Task) -> dict[str, Any]:
@@ -303,5 +319,29 @@ class TaskQueryService:
             "business_ref_id",
             "operation_source",
             "created_at",
+        )
+        return {field: getattr(item, field) for field in fields}
+
+    @staticmethod
+    def _completion_review_dict(
+        item: TaskCompletionReview,
+    ) -> dict[str, Any]:
+        fields = (
+            "completion_review_id",
+            "task_id",
+            "review_round",
+            "submitted_by_employee_no",
+            "completion_note",
+            "deliverable_summary",
+            "reviewer_employee_no",
+            "review_status",
+            "review_result",
+            "reject_reason",
+            "rework_node_id",
+            "submitted_task_version",
+            "reviewed_task_version",
+            "submitted_at",
+            "reviewed_at",
+            "is_legacy_import",
         )
         return {field: getattr(item, field) for field in fields}

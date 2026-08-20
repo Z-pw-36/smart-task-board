@@ -8,6 +8,13 @@ import type { AllowedAction, InboxItem, PaginatedInbox } from "../api/types";
 import { EmptyState, ErrorState, LoadingState } from "../components/Feedback";
 import { formatDate } from "../components/task-card-utils";
 
+const completionNavigationActions = new Set<AllowedAction>([
+  "submit_completion",
+  "approve_completion",
+  "reject_completion",
+  "reopen_node",
+]);
+
 export function InboxPage() {
   const queryClient = useQueryClient();
   const [actionCode, setActionCode] = useState("");
@@ -50,7 +57,7 @@ export function InboxPage() {
   return (
     <div className="page-stack">
       <header className="page-header"><div><p className="eyebrow">行动队列</p><h1>待处理</h1><p>最终权限仍由服务端状态机校验。</p></div></header>
-      <label className="single-filter">待办类型<select value={actionCode} onChange={(event) => setActionCode(event.target.value)}><option value="">全部</option><option value="confirm_task">任务确认</option><option value="accept_task">接受任务</option><option value="handle_returned_task">退回处理</option><option value="start_node">开始节点</option><option value="update_node">更新节点</option><option value="complete_node">完成节点</option><option value="submit_completion">提交验收</option><option value="approve_completion">完成验收</option><option value="report_due">进度待汇报</option><option value="handle_issue">卡点待处理</option></select></label>
+      <label className="single-filter">待办类型<select value={actionCode} onChange={(event) => setActionCode(event.target.value)}><option value="">全部</option><option value="confirm_task">任务确认</option><option value="accept_task">接受任务</option><option value="handle_returned_task">退回处理</option><option value="start_node">开始节点</option><option value="update_node">更新节点</option><option value="complete_node">完成节点</option><option value="submit_completion">提交验收</option><option value="approve_completion">待我验收</option><option value="reopen_node">重开返工节点</option><option value="report_due">进度待汇报</option><option value="handle_issue">卡点待处理</option></select></label>
       {notice && <div className="notice" role="status">{notice}</div>}
       {inbox.isLoading && <LoadingState />}
       {inbox.isError && <ErrorState error={inbox.error} retry={() => void inbox.refetch()} />}
@@ -64,7 +71,12 @@ export function InboxPage() {
             <p>{item.reason}</p>
             <p className="muted">截止：{formatDate(item.task.deadline)} · 版本 v{item.expected_task_version}</p>
             <div className="action-row">
-              {item.allowed_actions.map((allowedAction) => (
+              {item.allowed_actions.some((allowedAction) => completionNavigationActions.has(allowedAction)) && (
+                <Link className="button primary" to={`/tasks/${item.task.task_id}`}>
+                  {completionNavigationLabel(item.allowed_actions)}
+                </Link>
+              )}
+              {item.allowed_actions.filter((allowedAction) => !completionNavigationActions.has(allowedAction)).map((allowedAction) => (
                 allowedAction === "submit_progress_report" || allowedAction === "report_task_issue" ? (
                   <Link className="button primary" key={allowedAction} to={`/tasks/${item.task.task_id}`}>
                     {actionLabels[allowedAction]}
@@ -81,4 +93,12 @@ export function InboxPage() {
       </div>
     </div>
   );
+}
+
+function completionNavigationLabel(actions: AllowedAction[]): string {
+  if (actions.includes("approve_completion") || actions.includes("reject_completion")) {
+    return "查看并验收";
+  }
+  if (actions.includes("reopen_node")) return "查看返工要求";
+  return "填写完成说明并提交";
 }

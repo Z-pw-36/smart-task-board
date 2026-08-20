@@ -10,11 +10,18 @@ from app.api.dependencies import (
     get_task_workflow_service,
 )
 from app.schemas import (
+    CompletionDecisionRequest,
+    CompletionReviewActionResponse,
+    CompletionReviewResponse,
     CreateTaskRequest,
     ErrorResponse,
     NodeActionResponse,
+    PaginatedCompletionReviewResponse,
     PaginatedTaskStatusLogResponse,
+    RejectCompletionRequest,
+    ReopenNodeRequest,
     ReturnTaskRequest,
+    SubmitCompletionRequest,
     TaskActionRequest,
     TaskActionResponse,
     TaskDetailResponse,
@@ -72,8 +79,7 @@ def _create_command(request: CreateTaskRequest, actor: str) -> CreateTaskDraftCo
             TaskNodeDependencyDraft(**item.model_dump()) for item in request.dependencies
         ),
         node_participants=tuple(
-            TaskNodeParticipantDraft(**item.model_dump())
-            for item in request.node_participants
+            TaskNodeParticipantDraft(**item.model_dump()) for item in request.node_participants
         ),
         extraction_record_ids=request.extraction_record_ids,
     )
@@ -159,8 +165,59 @@ def list_task_status_logs(
     )
 
 
+@router.get(
+    "/{task_id}/completion-reviews",
+    response_model=PaginatedCompletionReviewResponse,
+    summary="List immutable completion review rounds",
+    responses=ERROR_RESPONSES,
+)
+def list_completion_reviews(
+    task_id: UUID,
+    actor: Actor,
+    query_service: QueryService,
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> dict[str, Any]:
+    return query_service.list_completion_reviews(
+        task_id,
+        actor,
+        limit=limit,
+        offset=offset,
+    )
+
+
+@router.get(
+    "/{task_id}/completion-reviews/{completion_review_id}",
+    response_model=CompletionReviewResponse,
+    summary="Get one completion review round",
+    responses=ERROR_RESPONSES,
+)
+def get_completion_review(
+    task_id: UUID,
+    completion_review_id: UUID,
+    actor: Actor,
+    query_service: QueryService,
+) -> dict[str, Any]:
+    return query_service.get_completion_review(
+        task_id,
+        completion_review_id,
+        actor,
+    )
+
+
 def _task_response(task: Any) -> TaskActionResponse:
     return TaskActionResponse.model_validate(task)
+
+
+def _completion_response(result: Any) -> CompletionReviewActionResponse:
+    task, review = result
+    return CompletionReviewActionResponse(
+        task_id=task.task_id,
+        status=task.status,
+        task_version=task.task_version,
+        updated_at=task.updated_at,
+        review=CompletionReviewResponse.model_validate(review),
+    )
 
 
 @router.post(
@@ -298,44 +355,72 @@ def resend_task(
 
 @router.post(
     "/{task_id}/actions/submit-completion",
-    response_model=TaskActionResponse,
+    response_model=CompletionReviewActionResponse,
     summary="Submit a completed task for review",
     responses=ERROR_RESPONSES,
 )
 def submit_completion(
     task_id: UUID,
-    request: TaskActionRequest,
+    request: SubmitCompletionRequest,
     actor: Actor,
     service: TaskService,
-) -> TaskActionResponse:
-    return _task_response(
+) -> CompletionReviewActionResponse:
+    return _completion_response(
         service.submit_completion(
             task_id,
             actor,
             request.expected_task_version,
             OPERATION_SOURCE,
+            request.completion_note,
+            request.deliverable_summary,
         )
     )
 
 
 @router.post(
     "/{task_id}/actions/approve-completion",
-    response_model=TaskActionResponse,
+    response_model=CompletionReviewActionResponse,
     summary="Approve task completion",
     responses=ERROR_RESPONSES,
 )
 def approve_completion(
     task_id: UUID,
-    request: TaskActionRequest,
+    request: CompletionDecisionRequest,
     actor: Actor,
     service: TaskService,
-) -> TaskActionResponse:
-    return _task_response(
+) -> CompletionReviewActionResponse:
+    return _completion_response(
         service.approve_completion(
             task_id,
             actor,
             request.expected_task_version,
             OPERATION_SOURCE,
+            request.completion_review_id,
+        )
+    )
+
+
+@router.post(
+    "/{task_id}/actions/reject-completion",
+    response_model=CompletionReviewActionResponse,
+    summary="Reject task completion for overall or node rework",
+    responses=ERROR_RESPONSES,
+)
+def reject_completion(
+    task_id: UUID,
+    request: RejectCompletionRequest,
+    actor: Actor,
+    service: TaskService,
+) -> CompletionReviewActionResponse:
+    return _completion_response(
+        service.reject_completion(
+            task_id,
+            actor,
+            request.expected_task_version,
+            OPERATION_SOURCE,
+            request.completion_review_id,
+            request.reject_reason,
+            request.rework_node_id,
         )
     )
 
@@ -421,5 +506,30 @@ def complete_node(
         actor,
         request.expected_task_version,
         OPERATION_SOURCE,
+    )
+    return _node_response(task_id, node_id, actor, query_service)
+
+
+@router.post(
+    "/{task_id}/nodes/{node_id}/actions/reopen",
+    response_model=NodeActionResponse,
+    summary="Explicitly reopen the node selected by a rejected review",
+    responses=ERROR_RESPONSES,
+)
+def reopen_node(
+    task_id: UUID,
+    node_id: UUID,
+    request: ReopenNodeRequest,
+    actor: Actor,
+    service: NodeService,
+    query_service: QueryService,
+) -> NodeActionResponse:
+    service.reopen_node(
+        task_id,
+        node_id,
+        actor,
+        request.expected_task_version,
+        OPERATION_SOURCE,
+        request.completion_review_id,
     )
     return _node_response(task_id, node_id, actor, query_service)

@@ -21,6 +21,7 @@ from app.models import (
     AIExtractionRecord,
     Department,
     Task,
+    TaskCompletionReview,
     TaskNode,
     TaskNodeDependency,
     TaskNodeParticipant,
@@ -34,7 +35,7 @@ pytestmark = pytest.mark.postgresql
 EXPECTED_DATABASE = "smarttaskboard_core_test"
 EXPECTED_HOST = "127.0.0.1"
 EXPECTED_PORT = 46479
-EXPECTED_REVISION = "576787492bd1"
+EXPECTED_REVISION = "c31f8e7a4d02"
 EXPECTED_TABLES = {
     "ai_extraction_records",
     "departments",
@@ -43,6 +44,7 @@ EXPECTED_TABLES = {
     "task_node_participants",
     "task_nodes",
     "task_participants",
+    "task_completion_reviews",
     "task_progress_reports",
     "task_issues",
     "task_status_logs",
@@ -58,8 +60,6 @@ FORBIDDEN_RESPONSE_KEYS = {
     "sqlalchemy_instance_state",
 }
 UNIMPLEMENTED_ACTIONS = {
-    "reject_completion",
-    "reopen_node",
     "retry_node",
 }
 
@@ -198,11 +198,13 @@ def _post_action(
     task_id: UUID,
     action: str,
     expected_task_version: int,
+    **payload: object,
 ):
+    body = {"expected_task_version": expected_task_version, **payload}
     return client.post(
         f"/api/v1/tasks/{task_id}/actions/{action}",
         headers=_bearer(token),
-        json={"expected_task_version": expected_task_version},
+        json=body,
     )
 
 
@@ -268,6 +270,11 @@ def _cleanup_and_count(
                 delete(TaskStatusLog).where(TaskStatusLog.task_id.in_(task_ids))
             )
             connection.execute(
+                delete(TaskCompletionReview).where(
+                    TaskCompletionReview.task_id.in_(task_ids)
+                )
+            )
+            connection.execute(
                 delete(TaskNodeDependency).where(
                     TaskNodeDependency.task_id.in_(task_ids)
                 )
@@ -297,6 +304,9 @@ def _cleanup_and_count(
     selectors = (
         select(func.count()).select_from(TaskStatusLog).where(
             TaskStatusLog.task_id.in_(task_ids)
+        ),
+        select(func.count()).select_from(TaskCompletionReview).where(
+            TaskCompletionReview.task_id.in_(task_ids)
         ),
         select(func.count()).select_from(TaskNodeDependency).where(
             TaskNodeDependency.task_id.in_(task_ids)
@@ -726,11 +736,36 @@ def test_batch1_real_bearer_task_board_workflow_and_cleanup(
                 alpha_id,
                 "submit-completion",
                 9,
+                completion_note="All workflow steps completed",
+                deliverable_summary="The final API deliverable is ready",
             )
             assert (completion.status_code, completion.json()["status"]) == (
                 200,
                 "pending_review",
             )
+            completion_review_id = completion.json()["review"][
+                "completion_review_id"
+            ]
+            assert completion.json()["review"] | {
+                "submitted_at": None,
+            } == {
+                "completion_review_id": completion_review_id,
+                "task_id": str(alpha_id),
+                "review_round": 1,
+                "submitted_by_employee_no": refs.assignee,
+                "completion_note": "All workflow steps completed",
+                "deliverable_summary": "The final API deliverable is ready",
+                "reviewer_employee_no": refs.reviewer,
+                "review_status": "submitted",
+                "review_result": None,
+                "reject_reason": None,
+                "rework_node_id": None,
+                "submitted_task_version": 10,
+                "reviewed_task_version": None,
+                "submitted_at": None,
+                "reviewed_at": None,
+                "is_legacy_import": False,
+            }
 
             review_inbox = client.get(
                 "/api/v1/tasks/inbox?action_code=approve_completion",
@@ -742,13 +777,25 @@ def test_batch1_real_bearer_task_board_workflow_and_cleanup(
             )
             assert review_inbox.status_code == review_actions.status_code == 200
             assert review_inbox.json()["total"] == 1
-            assert review_actions.json()["allowed_actions"] == ["approve_completion"]
+            assert len(review_inbox.json()["items"]) == 1
+            assert review_inbox.json()["items"][0]["inbox_item_type"] == (
+                "approve_completion"
+            )
+            assert review_inbox.json()["items"][0]["allowed_actions"] == [
+                "approve_completion",
+                "reject_completion",
+            ]
+            assert review_actions.json()["allowed_actions"] == [
+                "approve_completion",
+                "reject_completion",
+            ]
             approved = _post_action(
                 client,
                 reviewer_token,
                 alpha_id,
                 "approve-completion",
                 10,
+                completion_review_id=completion_review_id,
             )
             assert (approved.status_code, approved.json()["status"]) == (
                 200,

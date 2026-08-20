@@ -4,6 +4,9 @@ from app.repositories.ai_extraction_record import AIExtractionRecordRepository
 from app.repositories.department import DepartmentRepository
 from app.repositories.progress_report import ProgressReportRepository
 from app.repositories.task import TaskRepository
+from app.repositories.task_completion_review import (
+    TaskCompletionReviewRepository,
+)
 from app.repositories.task_input import TaskInputRepository
 from app.repositories.task_issue import TaskIssueRepository
 from app.repositories.task_node import TaskNodeRepository
@@ -15,6 +18,7 @@ __all__ = [
     "DepartmentRepository",
     "ProgressReportRepository",
     "TaskInputRepository",
+    "TaskCompletionReviewRepository",
     "TaskIssueRepository",
     "TaskNodeRepository",
     "TaskRepository",

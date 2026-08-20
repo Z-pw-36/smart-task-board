@@ -1,6 +1,7 @@
 from app.models.ai_extraction_record import AIExtractionRecord
 from app.models.department import Department
 from app.models.task import Task
+from app.models.task_completion_review import TaskCompletionReview
 from app.models.task_input import TaskInput
 from app.models.task_issue import TaskIssue
 from app.models.task_node import TaskNode
@@ -15,6 +16,7 @@ __all__ = [
     "AIExtractionRecord",
     "Department",
     "Task",
+    "TaskCompletionReview",
     "TaskInput",
     "TaskIssue",
     "TaskNode",

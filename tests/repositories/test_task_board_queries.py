@@ -23,6 +23,8 @@ def test_related_predicate_uses_only_task_relationships_not_global_roles() -> No
     assert "task_nodes" in sql
     assert "task_node_participants" in sql
     assert "report_to_employee_no" in sql
+    assert "task_completion_reviews" in sql
+    assert "submitted_by_employee_no" in sql
     assert "reviewer_employee_no" in sql
     assert "role_type" not in sql
 
@@ -66,6 +68,7 @@ def test_inbox_candidates_exclude_node_participant_and_admin_shortcuts() -> None
     statement = session.execute.call_args.args[0]
     sql = _sql(statement)
     assert "task_node_participants" not in sql
+    assert "task_completion_reviews" not in sql
     assert "role_type" not in sql
     assert "owner_employee_no" in sql
     assert "LIMIT" in sql

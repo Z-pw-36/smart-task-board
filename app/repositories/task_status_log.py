@@ -64,3 +64,24 @@ class TaskStatusLogRepository:
             .limit(1)
         )
         return self.session.execute(statement).scalar_one_or_none()
+
+    def has_action_for_business_ref(
+        self,
+        task_id: UUID,
+        action_type: str,
+        business_ref_type: str,
+        business_ref_id: UUID,
+        *,
+        after_task_version: int | None = None,
+    ) -> bool:
+        event = select(TaskStatusLog.status_log_id).where(
+            TaskStatusLog.task_id == task_id,
+            TaskStatusLog.action_type == action_type,
+            TaskStatusLog.business_ref_type == business_ref_type,
+            TaskStatusLog.business_ref_id == business_ref_id,
+        )
+        if after_task_version is not None:
+            event = event.where(
+                TaskStatusLog.task_version > after_task_version
+            )
+        return bool(self.session.execute(select(event.exists())).scalar_one())

@@ -4,11 +4,12 @@ from app.db.base import Base
 from app.models import Department, User
 
 
-def test_metadata_contains_only_approved_batch_2a_business_tables() -> None:
+def test_metadata_contains_only_approved_business_tables() -> None:
     assert set(Base.metadata.tables) == {
         "ai_extraction_records",
         "departments",
         "task_inputs",
+        "task_completion_reviews",
         "task_node_dependencies",
         "task_node_participants",
         "task_nodes",
@@ -31,7 +32,6 @@ def test_metadata_contains_only_approved_batch_2a_business_tables() -> None:
         "workspaces",
         "projects",
         "task_change_requests",
-        "task_completion_reviews",
         "performance_metrics",
         "task_performance_matches",
         "employee_profiles",

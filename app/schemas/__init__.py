@@ -1,3 +1,12 @@
+from app.schemas.completion_review import (
+    CompletionDecisionRequest,
+    CompletionReviewActionResponse,
+    CompletionReviewResponse,
+    PaginatedCompletionReviewResponse,
+    RejectCompletionRequest,
+    ReopenNodeRequest,
+    SubmitCompletionRequest,
+)
 from app.schemas.error import ErrorDetail, ErrorResponse
 from app.schemas.task import (
     AIExtractionRecordSummaryResponse,
@@ -33,16 +42,22 @@ from app.schemas.task_node import (
 __all__ = [
     "AIExtractionRecordSummaryResponse",
     "AvailableActionsResponse",
+    "CompletionDecisionRequest",
+    "CompletionReviewActionResponse",
+    "CompletionReviewResponse",
     "CreateTaskRequest",
     "DashboardSummaryResponse",
     "ErrorDetail",
     "ErrorResponse",
     "InboxItemResponse",
     "NodeActionResponse",
+    "PaginatedCompletionReviewResponse",
     "PaginatedTaskStatusLogResponse",
     "PaginatedInboxResponse",
     "PaginatedTaskBoardResponse",
     "ReturnTaskRequest",
+    "RejectCompletionRequest",
+    "ReopenNodeRequest",
     "TaskActionRequest",
     "TaskActionResponse",
     "TaskBoardSummaryResponse",
@@ -56,5 +71,6 @@ __all__ = [
     "TaskParticipantDraftRequest",
     "TaskParticipantResponse",
     "TaskStatusLogResponse",
+    "SubmitCompletionRequest",
     "UpdateNodeProgressRequest",
 ]

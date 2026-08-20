@@ -3,11 +3,12 @@ from __future__ import annotations
 from collections.abc import Callable
 from datetime import UTC, datetime
 from decimal import Decimal
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from app.db.unit_of_work import UnitOfWork
 from app.models import (
     Task,
+    TaskCompletionReview,
     TaskNode,
     TaskNodeDependency,
     TaskNodeParticipant,
@@ -530,7 +531,14 @@ class TaskWorkflowService:
         actor_employee_no: str,
         expected_task_version: int,
         operation_source: str,
-    ) -> Task:
+        completion_note: str,
+        deliverable_summary: str,
+    ) -> tuple[Task, TaskCompletionReview]:
+        normalized_note = _required_text(completion_note, "completion_note")
+        normalized_summary = _required_text(
+            deliverable_summary,
+            "deliverable_summary",
+        )
         with self._uow_factory() as uow:
             task = _lock_task(uow, task_id, expected_task_version)
             _require_state(task, TASK_IN_PROGRESS)
@@ -540,18 +548,75 @@ class TaskWorkflowService:
                 "main assignee",
             )
             nodes = _validate_existing_graph(uow, task.task_id)
-            if not nodes:
-                raise BusinessValidationError("task must have at least one node")
-            if any(node.status != "completed" for node in nodes):
-                raise BusinessValidationError("all task nodes must be completed")
+            self._require_completed_nodes(nodes)
             if uow.task_issues.has_non_closed(task.task_id):
                 raise OpenTaskIssueConflictError(
                     "all task issues must be closed before submitting completion"
                 )
+            latest_rejected = uow.task_completion_reviews.get_latest_rejected(
+                task.task_id
+            )
+            if (
+                latest_rejected is not None
+                and latest_rejected.rework_node_id is not None
+            ):
+                if latest_rejected.reviewed_task_version is None:
+                    raise BusinessValidationError(
+                        "rejected completion review is missing its reviewed version"
+                    )
+                was_reopened = (
+                    uow.task_status_logs.has_action_for_business_ref(
+                        task.task_id,
+                        "node_reopened",
+                        "completion_review",
+                        latest_rejected.completion_review_id,
+                        after_task_version=(
+                            latest_rejected.reviewed_task_version
+                        ),
+                    )
+                )
+                if not was_reopened:
+                    raise InvalidStateTransitionError(
+                        "the rejected rework node must be explicitly reopened"
+                    )
+                rework_node = next(
+                    (
+                        node
+                        for node in nodes
+                        if node.node_id == latest_rejected.rework_node_id
+                    ),
+                    None,
+                )
+                if rework_node is None:
+                    raise BusinessValidationError(
+                        "the rejected rework node does not belong to the task"
+                    )
+                if (
+                    rework_node.status != "completed"
+                    or rework_node.progress_percent != 100
+                ):
+                    raise BusinessValidationError(
+                        "the reopened rework node must be completed at 100 percent"
+                    )
             now = _aware_utc(self._clock(), "clock")
+            review_round = uow.task_completion_reviews.next_round(task.task_id)
+            reviewer = task.reviewer_employee_no or task.creator_employee_no
             task.status = TASK_PENDING_REVIEW
             _increment_task(task, now)
-            reviewer = task.reviewer_employee_no or task.creator_employee_no
+            review = TaskCompletionReview(
+                completion_review_id=uuid4(),
+                task_id=task.task_id,
+                review_round=review_round,
+                submitted_by_employee_no=actor_employee_no,
+                completion_note=normalized_note,
+                deliverable_summary=normalized_summary,
+                reviewer_employee_no=reviewer,
+                review_status="submitted",
+                submitted_task_version=task.task_version,
+                submitted_at=now,
+                is_legacy_import=False,
+            )
+            uow.task_completion_reviews.add(review)
             _append_log(
                 uow,
                 task,
@@ -562,9 +627,11 @@ class TaskWorkflowService:
                 target_employee_no=reviewer,
                 operation_source=operation_source,
                 now=now,
+                business_ref_type="completion_review",
+                business_ref_id=review.completion_review_id,
             )
             uow.commit()
-            return task
+            return task, review
 
     def approve_completion(
         self,
@@ -572,24 +639,31 @@ class TaskWorkflowService:
         actor_employee_no: str,
         expected_task_version: int,
         operation_source: str,
-    ) -> Task:
+        completion_review_id: UUID,
+    ) -> tuple[Task, TaskCompletionReview]:
         with self._uow_factory() as uow:
             task = _lock_task(uow, task_id, expected_task_version)
             _require_state(task, TASK_PENDING_REVIEW)
-            reviewer = task.reviewer_employee_no or task.creator_employee_no
-            _require_actor(actor_employee_no, reviewer, "reviewer")
+            review = self._lock_submitted_review(
+                uow,
+                task,
+                completion_review_id,
+            )
+            _require_actor(
+                actor_employee_no,
+                review.reviewer_employee_no,
+                "reviewer",
+            )
             nodes = _validate_existing_graph(uow, task.task_id)
-            if not nodes or any(
-                node.status != "completed" or node.progress_percent != 100
-                for node in nodes
-            ):
-                raise BusinessValidationError(
-                    "all task nodes must be completed at 100 percent"
-                )
+            self._require_completed_nodes(nodes)
             now = _aware_utc(self._clock(), "clock")
             task.status = TASK_COMPLETED
             task.completed_at = now
             _increment_task(task, now)
+            review.review_status = "approved"
+            review.review_result = "approved"
+            review.reviewed_at = now
+            review.reviewed_task_version = task.task_version
             _append_log(
                 uow,
                 task,
@@ -599,9 +673,105 @@ class TaskWorkflowService:
                 operator_employee_no=actor_employee_no,
                 operation_source=operation_source,
                 now=now,
+                business_ref_type="completion_review",
+                business_ref_id=review.completion_review_id,
             )
             uow.commit()
-            return task
+            return task, review
+
+    def reject_completion(
+        self,
+        task_id: UUID,
+        actor_employee_no: str,
+        expected_task_version: int,
+        operation_source: str,
+        completion_review_id: UUID,
+        reject_reason: str,
+        rework_node_id: UUID | None = None,
+    ) -> tuple[Task, TaskCompletionReview]:
+        normalized_reason = _required_text(reject_reason, "reject_reason")
+        with self._uow_factory() as uow:
+            task = _lock_task(uow, task_id, expected_task_version)
+            _require_state(task, TASK_PENDING_REVIEW)
+            review = self._lock_submitted_review(
+                uow,
+                task,
+                completion_review_id,
+            )
+            _require_actor(
+                actor_employee_no,
+                review.reviewer_employee_no,
+                "reviewer",
+            )
+            if rework_node_id is not None:
+                rework_node = uow.task_nodes.get_node(rework_node_id)
+                if rework_node is None:
+                    raise EntityNotFoundError("rework task node was not found")
+                if rework_node.task_id != task.task_id:
+                    raise BusinessValidationError(
+                        "rework task node does not belong to the task"
+                    )
+                if rework_node.status != "completed":
+                    raise InvalidStateTransitionError(
+                        "rework requires a completed task node"
+                    )
+            now = _aware_utc(self._clock(), "clock")
+            task.status = TASK_IN_PROGRESS
+            task.completed_at = None
+            _increment_task(task, now)
+            review.review_status = "rejected"
+            review.review_result = "rejected"
+            review.reject_reason = normalized_reason
+            review.rework_node_id = rework_node_id
+            review.reviewed_at = now
+            review.reviewed_task_version = task.task_version
+            _append_log(
+                uow,
+                task,
+                from_status=TASK_PENDING_REVIEW,
+                to_status=TASK_IN_PROGRESS,
+                action_type="completion_rejected",
+                operator_employee_no=actor_employee_no,
+                target_employee_no=task.main_assignee_employee_no,
+                operation_source=operation_source,
+                reason=normalized_reason,
+                now=now,
+                business_ref_type="completion_review",
+                business_ref_id=review.completion_review_id,
+            )
+            uow.commit()
+            return task, review
+
+    @staticmethod
+    def _lock_submitted_review(
+        uow: UnitOfWork,
+        task: Task,
+        completion_review_id: UUID,
+    ) -> TaskCompletionReview:
+        review = uow.task_completion_reviews.get_by_task_and_id_for_update(
+            task.task_id,
+            completion_review_id,
+        )
+        if review is None:
+            raise EntityNotFoundError("completion review was not found")
+        if (
+            review.review_status != "submitted"
+            or review.submitted_task_version != task.task_version
+        ):
+            raise InvalidStateTransitionError(
+                "completion review is not the current submitted round"
+            )
+        return review
+
+    @staticmethod
+    def _require_completed_nodes(nodes: list[TaskNode]) -> None:
+        if not nodes or any(
+            node.status != "completed" or node.progress_percent != 100
+            for node in nodes
+        ):
+            raise BusinessValidationError(
+                "all task nodes must be completed at 100 percent"
+            )
 
     @staticmethod
     def _require_user(uow: UnitOfWork, employee_no: str) -> None:

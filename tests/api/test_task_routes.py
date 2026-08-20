@@ -27,6 +27,33 @@ def _task_result(task_id: UUID, status: str, version: int) -> SimpleNamespace:
     )
 
 
+def _review_result(
+    task_id: UUID,
+    *,
+    review_status: str = "submitted",
+    review_round: int = 1,
+) -> SimpleNamespace:
+    terminal = review_status != "submitted"
+    return SimpleNamespace(
+        completion_review_id=uuid4(),
+        task_id=task_id,
+        review_round=review_round,
+        submitted_by_employee_no="E-ASSIGNEE",
+        completion_note="Work completed",
+        deliverable_summary="Release package",
+        reviewer_employee_no="E-REVIEWER",
+        review_status=review_status,
+        review_result=review_status if terminal else None,
+        reject_reason="Revise node" if review_status == "rejected" else None,
+        rework_node_id=None,
+        submitted_task_version=10,
+        reviewed_task_version=11 if terminal else None,
+        submitted_at=NOW,
+        reviewed_at=NOW if terminal else None,
+        is_legacy_import=False,
+    )
+
+
 def _node(task_id: UUID, node_id: UUID) -> dict[str, object]:
     return {
         "node_id": node_id,
@@ -109,6 +136,12 @@ def route_context() -> Iterator[tuple[TestClient, MagicMock, MagicMock, MagicMoc
         "offset": 0,
         "total": 0,
     }
+    query.list_completion_reviews.return_value = {
+        "items": [],
+        "limit": 20,
+        "offset": 0,
+        "total": 0,
+    }
     query.get_node_action_snapshot.return_value = {
         "task_id": task_id,
         "node_id": node_id,
@@ -155,8 +188,6 @@ def test_create_route_builds_command_from_header(route_context) -> None:
         ("confirm-self-assigned", "confirm_self_assigned", "in_progress", 3),
         ("accept", "accept_task", "in_progress", 4),
         ("resend", "resend_task", "pending_acceptance", 5),
-        ("submit-completion", "submit_completion", "pending_review", 10),
-        ("approve-completion", "approve_completion", "completed", 11),
     ],
 )
 def test_task_action_routes_forward_actor_version_and_fixed_source(
@@ -184,6 +215,130 @@ def test_task_action_routes_forward_actor_version_and_fixed_source(
         "rest_api",
     )
     assert response.json()["status"] == status_value
+
+
+def test_completion_routes_forward_content_round_and_rework_scope(route_context) -> None:
+    client, tasks, nodes, query = route_context
+    task_id, node_id, review_id = uuid4(), uuid4(), uuid4()
+    submitted = _review_result(task_id)
+    submitted.completion_review_id = review_id
+    rejected = _review_result(task_id, review_status="rejected")
+    rejected.completion_review_id = review_id
+    tasks.submit_completion.return_value = (
+        _task_result(task_id, "pending_review", 10),
+        submitted,
+    )
+    tasks.reject_completion.return_value = (
+        _task_result(task_id, "in_progress", 11),
+        rejected,
+    )
+    headers = {"X-Employee-No": "E-ACTOR"}
+
+    submit = client.post(
+        f"/api/v1/tasks/{task_id}/actions/submit-completion",
+        headers=headers,
+        json={
+            "expected_task_version": 9,
+            "completion_note": "  Work completed  ",
+            "deliverable_summary": "  Release package  ",
+        },
+    )
+    reject = client.post(
+        f"/api/v1/tasks/{task_id}/actions/reject-completion",
+        headers=headers,
+        json={
+            "expected_task_version": 10,
+            "completion_review_id": str(review_id),
+            "reject_reason": "  Revise node  ",
+            "rework_node_id": str(node_id),
+        },
+    )
+    reopened = client.post(
+        f"/api/v1/tasks/{task_id}/nodes/{node_id}/actions/reopen",
+        headers=headers,
+        json={
+            "expected_task_version": 11,
+            "completion_review_id": str(review_id),
+        },
+    )
+
+    assert [submit.status_code, reject.status_code, reopened.status_code] == [200, 200, 200]
+    tasks.submit_completion.assert_called_once_with(
+        task_id,
+        "E-ACTOR",
+        9,
+        "rest_api",
+        "Work completed",
+        "Release package",
+    )
+    tasks.reject_completion.assert_called_once_with(
+        task_id,
+        "E-ACTOR",
+        10,
+        "rest_api",
+        review_id,
+        "Revise node",
+        node_id,
+    )
+    nodes.reopen_node.assert_called_once_with(
+        task_id,
+        node_id,
+        "E-ACTOR",
+        11,
+        "rest_api",
+        review_id,
+    )
+    assert submit.json()["review"]["completion_review_id"] == str(review_id)
+    assert reject.json()["review"]["review_status"] == "rejected"
+    query.get_node_action_snapshot.assert_called_with(task_id, node_id, "E-ACTOR")
+
+
+def test_approve_completion_requires_and_forwards_review_id(route_context) -> None:
+    client, tasks, _, _ = route_context
+    task_id, review_id = uuid4(), uuid4()
+    approved = _review_result(task_id, review_status="approved")
+    approved.completion_review_id = review_id
+    tasks.approve_completion.return_value = (
+        _task_result(task_id, "completed", 11),
+        approved,
+    )
+
+    response = client.post(
+        f"/api/v1/tasks/{task_id}/actions/approve-completion",
+        headers={"X-Employee-No": "E-REVIEWER"},
+        json={
+            "expected_task_version": 10,
+            "completion_review_id": str(review_id),
+        },
+    )
+
+    assert response.status_code == 200
+    tasks.approve_completion.assert_called_once_with(
+        task_id,
+        "E-REVIEWER",
+        10,
+        "rest_api",
+        review_id,
+    )
+    assert response.json()["review"]["review_result"] == "approved"
+
+
+def test_completion_requests_reject_blank_required_content(route_context) -> None:
+    client, tasks, _, _ = route_context
+    task_id = uuid4()
+
+    response = client.post(
+        f"/api/v1/tasks/{task_id}/actions/submit-completion",
+        headers={"X-Employee-No": "E-ASSIGNEE"},
+        json={
+            "expected_task_version": 9,
+            "completion_note": "   ",
+            "deliverable_summary": "Release package",
+        },
+    )
+
+    assert response.status_code == 422
+    tasks.submit_completion.assert_not_called()
 
 
 def test_return_route_forwards_trimmed_reason(route_context) -> None:
@@ -262,8 +417,28 @@ def test_query_routes_forward_actor_and_pagination(route_context) -> None:
         f"/api/v1/tasks/{task_id}/status-logs?limit=10&offset=5",
         headers=headers,
     )
+    review_id = uuid4()
+    query.get_completion_review.return_value = vars(_review_result(task_id))
+    query.get_completion_review.return_value["completion_review_id"] = review_id
+    reviews = client.get(
+        f"/api/v1/tasks/{task_id}/completion-reviews?limit=10&offset=5",
+        headers=headers,
+    )
+    review = client.get(
+        f"/api/v1/tasks/{task_id}/completion-reviews/{review_id}",
+        headers=headers,
+    )
 
-    assert [detail.status_code, listed.status_code, node.status_code, logs.status_code] == [
+    assert [
+        detail.status_code,
+        listed.status_code,
+        node.status_code,
+        logs.status_code,
+        reviews.status_code,
+        review.status_code,
+    ] == [
+        200,
+        200,
         200,
         200,
         200,
@@ -277,6 +452,17 @@ def test_query_routes_forward_actor_and_pagination(route_context) -> None:
         "E-READER",
         limit=10,
         offset=5,
+    )
+    query.list_completion_reviews.assert_called_once_with(
+        task_id,
+        "E-READER",
+        limit=10,
+        offset=5,
+    )
+    query.get_completion_review.assert_called_once_with(
+        task_id,
+        review_id,
+        "E-READER",
     )
 
 
@@ -339,6 +525,11 @@ def test_openapi_and_swagger_expose_only_approved_contract(route_context) -> Non
         ("GET", "/api/v1/tasks/{task_id}/nodes"),
         ("GET", "/api/v1/tasks/{task_id}/nodes/{node_id}"),
         ("GET", "/api/v1/tasks/{task_id}/status-logs"),
+        ("GET", "/api/v1/tasks/{task_id}/completion-reviews"),
+        (
+            "GET",
+            "/api/v1/tasks/{task_id}/completion-reviews/{completion_review_id}",
+        ),
         ("POST", "/api/v1/tasks/{task_id}/actions/submit-for-confirmation"),
         ("POST", "/api/v1/tasks/{task_id}/actions/confirm-and-send"),
         ("POST", "/api/v1/tasks/{task_id}/actions/confirm-self-assigned"),
@@ -347,9 +538,11 @@ def test_openapi_and_swagger_expose_only_approved_contract(route_context) -> Non
         ("POST", "/api/v1/tasks/{task_id}/actions/resend"),
         ("POST", "/api/v1/tasks/{task_id}/actions/submit-completion"),
         ("POST", "/api/v1/tasks/{task_id}/actions/approve-completion"),
+        ("POST", "/api/v1/tasks/{task_id}/actions/reject-completion"),
         ("POST", "/api/v1/tasks/{task_id}/nodes/{node_id}/actions/start"),
         ("PATCH", "/api/v1/tasks/{task_id}/nodes/{node_id}/progress"),
         ("POST", "/api/v1/tasks/{task_id}/nodes/{node_id}/actions/complete"),
+        ("POST", "/api/v1/tasks/{task_id}/nodes/{node_id}/actions/reopen"),
     }
     batch1_operations = {
         ("GET", "/api/v1/auth/prototype-users"),
@@ -379,14 +572,12 @@ def test_openapi_and_swagger_expose_only_approved_contract(route_context) -> Non
         ("POST", "/api/v1/tasks/{task_id}/issues/{issue_id}/actions/reject"),
         ("POST", "/api/v1/tasks/{task_id}/issues/{issue_id}/actions/close"),
     }
-    assert len(phase5_operations) == 16
+    assert len(phase5_operations) == 20
     assert phase5_operations <= api_operations
     assert batch1_operations <= api_operations
     assert batch2_operations <= api_operations
-    assert len(
-        {path for path in specification["paths"] if path.startswith("/api/v1")}
-    ) == 31
-    assert len(api_operations) == 34
+    assert len({path for path in specification["paths"] if path.startswith("/api/v1")}) == 35
+    assert len(api_operations) == 38
 
     security_schemes = specification["components"]["securitySchemes"]
     bearer_schemes = {
@@ -418,7 +609,9 @@ def test_openapi_and_swagger_expose_only_approved_contract(route_context) -> Non
     assert "pending_confirmation" in serialized
     assert "pending_acceptance" in serialized
     assert "ErrorResponse" in serialized
-    assert "reject-completion" not in serialized
+    assert "reject-completion" in serialized
+    assert "completion_review_id" in serialized
+    assert "/actions/reopen" in serialized
     assert "reopen-node" not in serialized
     assert "retry-node" not in serialized
     assert "postgresql" not in serialized.lower()

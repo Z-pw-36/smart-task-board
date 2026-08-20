@@ -22,7 +22,10 @@ def test_all_repositories_share_one_session_and_commit_is_explicit() -> None:
             uow.task_inputs,
             uow.ai_extraction_records,
             uow.tasks,
+            uow.task_completion_reviews,
             uow.task_nodes,
+            uow.progress_reports,
+            uow.task_issues,
             uow.task_status_logs,
         )
         assert all(repository.session is session for repository in repositories)

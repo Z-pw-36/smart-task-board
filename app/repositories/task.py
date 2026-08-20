@@ -4,7 +4,14 @@ from uuid import UUID
 from sqlalchemy import Select, and_, exists, false, func, or_, select
 from sqlalchemy.orm import Session
 
-from app.models import Task, TaskIssue, TaskNode, TaskNodeParticipant, TaskParticipant
+from app.models import (
+    Task,
+    TaskCompletionReview,
+    TaskIssue,
+    TaskNode,
+    TaskNodeParticipant,
+    TaskParticipant,
+)
 
 
 class TaskRepository:
@@ -68,6 +75,15 @@ class TaskRepository:
                 or_(
                     TaskIssue.reported_by_employee_no == employee_no,
                     TaskIssue.owner_employee_no == employee_no,
+                ),
+            ),
+            exists().where(
+                TaskCompletionReview.task_id == Task.task_id,
+                or_(
+                    TaskCompletionReview.submitted_by_employee_no
+                    == employee_no,
+                    TaskCompletionReview.reviewer_employee_no
+                    == employee_no,
                 ),
             ),
         )

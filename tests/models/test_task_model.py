@@ -16,6 +16,7 @@ from app.models import (
     AIExtractionRecord,
     Department,
     Task,
+    TaskCompletionReview,
     TaskIssue,
     TaskNode,
     TaskNodeDependency,
@@ -255,6 +256,7 @@ def test_task_relationships_are_explicit_bidirectional_and_safe() -> None:
     expected_relationships = {
         "ai_extraction_records",
         "creator",
+        "completion_reviews",
         "department",
         "issues",
         "main_assignee",
@@ -324,6 +326,13 @@ def test_task_relationships_are_explicit_bidirectional_and_safe() -> None:
         "created_at",
         "issue_id",
     )
+    assert relationships.completion_reviews.back_populates == "task"
+    assert relationships.completion_reviews.mapper.class_ is TaskCompletionReview
+    assert relationships.completion_reviews.uselist is True
+    assert tuple(
+        expression.name
+        for expression in relationships.completion_reviews.order_by
+    ) == ("review_round", "completion_review_id")
     assert relationships.merged_into_task.back_populates == "merged_from_tasks"
     assert relationships.merged_into_task.uselist is False
     assert {column.name for column in relationships.merged_into_task.remote_side} == {

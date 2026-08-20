@@ -2,6 +2,7 @@ from sqlalchemy import String, UniqueConstraint, inspect
 
 from app.models import (
     Task,
+    TaskCompletionReview,
     TaskInput,
     TaskIssue,
     TaskNode,
@@ -80,6 +81,7 @@ def test_user_relationships_are_bidirectional_unambiguous_and_safe() -> None:
 
     assert set(relationships.keys()) == {
         "department",
+        "assigned_completion_reviews",
         "closed_task_issues",
         "direct_reports",
         "manager",
@@ -94,6 +96,7 @@ def test_user_relationships_are_bidirectional_unambiguous_and_safe() -> None:
         "resolved_task_issues",
         "review_tasks",
         "submitted_task_inputs",
+        "submitted_completion_reviews",
         "submitted_progress_reports",
         "task_node_participations",
         "task_participations",
@@ -183,12 +186,35 @@ def test_user_relationships_are_bidirectional_unambiguous_and_safe() -> None:
         "reporter_employee_no"
     }
 
+    completion_review_relationships = {
+        "submitted_completion_reviews": (
+            "submitted_by",
+            "submitted_by_employee_no",
+        ),
+        "assigned_completion_reviews": (
+            "reviewer",
+            "reviewer_employee_no",
+        ),
+    }
+    for relationship_name, (back_populates, remote_column) in (
+        completion_review_relationships.items()
+    ):
+        relationship = relationships[relationship_name]
+        assert relationship.back_populates == back_populates
+        assert relationship.uselist is True
+        assert relationship.mapper.class_ is TaskCompletionReview
+        assert {column.name for column in relationship.remote_side} == {
+            remote_column
+        }
+
     for relationship_name in (
         "department",
+        "assigned_completion_reviews",
         "manager",
         "direct_reports",
         "closed_task_issues",
         "submitted_task_inputs",
+        "submitted_completion_reviews",
         "created_tasks",
         "assigned_tasks",
         "reporting_tasks",

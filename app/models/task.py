@@ -22,6 +22,7 @@ from app.db.base import Base
 if TYPE_CHECKING:
     from app.models.ai_extraction_record import AIExtractionRecord
     from app.models.department import Department
+    from app.models.task_completion_review import TaskCompletionReview
     from app.models.task_issue import TaskIssue
     from app.models.task_node import TaskNode
     from app.models.task_node_dependency import TaskNodeDependency
@@ -236,6 +237,14 @@ class Task(Base):
         back_populates="task",
         foreign_keys="TaskIssue.task_id",
         order_by="(TaskIssue.created_at, TaskIssue.issue_id)",
+    )
+    completion_reviews: Mapped[list[TaskCompletionReview]] = relationship(
+        back_populates="task",
+        foreign_keys="TaskCompletionReview.task_id",
+        order_by=(
+            "(TaskCompletionReview.review_round, "
+            "TaskCompletionReview.completion_review_id)"
+        ),
     )
     merged_into_task: Mapped[Task | None] = relationship(
         back_populates="merged_from_tasks",

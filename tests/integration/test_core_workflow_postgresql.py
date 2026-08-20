@@ -18,6 +18,7 @@ from app.models import (
     AIExtractionRecord,
     Department,
     Task,
+    TaskCompletionReview,
     TaskInput,
     TaskNode,
     TaskNodeDependency,
@@ -47,7 +48,7 @@ pytestmark = pytest.mark.postgresql
 EXPECTED_DATABASE = "smarttaskboard_core_test"
 EXPECTED_HOST = "127.0.0.1"
 EXPECTED_PORT = 46479
-EXPECTED_REVISION = "576787492bd1"
+EXPECTED_REVISION = "c31f8e7a4d02"
 EXPECTED_TABLES = {
     "ai_extraction_records",
     "departments",
@@ -56,6 +57,7 @@ EXPECTED_TABLES = {
     "task_node_participants",
     "task_nodes",
     "task_participants",
+    "task_completion_reviews",
     "task_progress_reports",
     "task_issues",
     "task_status_logs",
@@ -148,6 +150,11 @@ def phase4_records(phase4_engine: Engine) -> Iterator[Phase4Records]:
         if task_ids:
             connection.execute(
                 delete(TaskStatusLog).where(TaskStatusLog.task_id.in_(task_ids))
+            )
+            connection.execute(
+                delete(TaskCompletionReview).where(
+                    TaskCompletionReview.task_id.in_(task_ids)
+                )
             )
             connection.execute(
                 delete(TaskNodeDependency).where(
@@ -380,8 +387,21 @@ def test_complete_core_workflow_reaches_completed_with_continuous_logs(
         8,
         "phase4-integration",
     )
-    tasks.submit_completion(task.task_id, refs.assignee, 9, "phase4-integration")
-    tasks.approve_completion(task.task_id, refs.reviewer, 10, "phase4-integration")
+    _, review = tasks.submit_completion(
+        task.task_id,
+        refs.assignee,
+        9,
+        "phase4-integration",
+        "All planned work is complete",
+        "Both workflow deliverables are ready",
+    )
+    tasks.approve_completion(
+        task.task_id,
+        refs.reviewer,
+        10,
+        "phase4-integration",
+        review.completion_review_id,
+    )
 
     with phase4_session_factory() as session:
         stored_task = TaskRepository(session).get_by_id(task.task_id)
@@ -409,6 +429,25 @@ def test_complete_core_workflow_reaches_completed_with_continuous_logs(
             "completion_submitted",
             "completion_approved",
         ]
+        assert [
+            (log.business_ref_type, log.business_ref_id)
+            for log in logs[-2:]
+        ] == [
+            ("completion_review", review.completion_review_id),
+            ("completion_review", review.completion_review_id),
+        ]
+        stored_review = session.get(
+            TaskCompletionReview,
+            review.completion_review_id,
+        )
+        assert stored_review is not None
+        assert (
+            stored_review.review_round,
+            stored_review.review_status,
+            stored_review.review_result,
+            stored_review.submitted_task_version,
+            stored_review.reviewed_task_version,
+        ) == (1, "approved", "approved", 10, 11)
         extraction = session.get(AIExtractionRecord, refs.extraction_id)
         assert extraction is not None and extraction.task_id == task.task_id
         participant = TaskRepository(session).find_participant(

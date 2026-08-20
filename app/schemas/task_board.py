@@ -17,6 +17,8 @@ type AllowedAction = Literal[
     "complete_node",
     "submit_completion",
     "approve_completion",
+    "reject_completion",
+    "reopen_node",
     "submit_progress_report",
     "report_task_issue",
     "start_processing_issue",
@@ -33,6 +35,7 @@ type InboxActionCode = Literal[
     "complete_node",
     "submit_completion",
     "approve_completion",
+    "reopen_node",
     "report_due",
     "handle_issue",
 ]

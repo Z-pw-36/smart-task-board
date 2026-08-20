@@ -14,6 +14,7 @@ EXPECTED_TABLES = {
     "ai_extraction_records",
     "departments",
     "task_inputs",
+    "task_completion_reviews",
     "task_node_dependencies",
     "task_node_participants",
     "task_nodes",

@@ -19,6 +19,8 @@ export type AllowedAction =
   | "complete_node"
   | "submit_completion"
   | "approve_completion"
+  | "reject_completion"
+  | "reopen_node"
   | "submit_progress_report"
   | "report_task_issue"
   | "start_processing_issue"
@@ -169,6 +171,34 @@ export interface TaskIssue {
 
 export interface TaskIssuePage {
   items: TaskIssue[];
+  limit: number;
+  offset: number;
+  total: number;
+}
+
+export type CompletionReviewStatus = "submitted" | "approved" | "rejected";
+
+export interface TaskCompletionReview {
+  completion_review_id: string;
+  task_id: string;
+  review_round: number;
+  submitted_by_employee_no: string;
+  completion_note: string | null;
+  deliverable_summary: string | null;
+  reviewer_employee_no: string;
+  review_status: CompletionReviewStatus;
+  review_result: "approved" | "rejected" | null;
+  reject_reason: string | null;
+  rework_node_id: string | null;
+  submitted_task_version: number;
+  reviewed_task_version: number | null;
+  submitted_at: string;
+  reviewed_at: string | null;
+  is_legacy_import: boolean;
+}
+
+export interface TaskCompletionReviewPage {
+  items: TaskCompletionReview[];
   limit: number;
   offset: number;
   total: number;

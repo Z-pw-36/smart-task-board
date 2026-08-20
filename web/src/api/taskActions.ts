@@ -6,6 +6,10 @@ export type TaskLifecycleAction = Exclude<
   | "start_node"
   | "update_node_progress"
   | "complete_node"
+  | "submit_completion"
+  | "approve_completion"
+  | "reject_completion"
+  | "reopen_node"
   | "submit_progress_report"
   | "report_task_issue"
   | "start_processing_issue"
@@ -21,8 +25,6 @@ const actionPaths: Record<TaskLifecycleAction, string> = {
   accept: "accept",
   return: "return",
   resend: "resend",
-  submit_completion: "submit-completion",
-  approve_completion: "approve-completion",
 };
 
 export const actionLabels: Record<AllowedAction, string> = {
@@ -37,6 +39,8 @@ export const actionLabels: Record<AllowedAction, string> = {
   complete_node: "完成节点",
   submit_completion: "提交验收",
   approve_completion: "通过验收",
+  reject_completion: "驳回验收",
+  reopen_node: "重开节点",
   submit_progress_report: "提交进度汇报",
   report_task_issue: "上报卡点",
   start_processing_issue: "开始处理",
@@ -80,6 +84,69 @@ export async function runNodeAction(
     body: JSON.stringify({
       expected_task_version: version,
       ...(action === "update_node_progress" ? { progress_percent: progressPercent } : {}),
+    }),
+  });
+}
+
+export async function submitCompletion(
+  taskId: string,
+  version: number,
+  completionNote: string,
+  deliverableSummary: string,
+): Promise<void> {
+  await apiRequest(`/api/v1/tasks/${taskId}/actions/submit-completion`, {
+    method: "POST",
+    body: JSON.stringify({
+      expected_task_version: version,
+      completion_note: completionNote,
+      deliverable_summary: deliverableSummary,
+    }),
+  });
+}
+
+export async function approveCompletion(
+  taskId: string,
+  version: number,
+  completionReviewId: string,
+): Promise<void> {
+  await apiRequest(`/api/v1/tasks/${taskId}/actions/approve-completion`, {
+    method: "POST",
+    body: JSON.stringify({
+      expected_task_version: version,
+      completion_review_id: completionReviewId,
+    }),
+  });
+}
+
+export async function rejectCompletion(
+  taskId: string,
+  version: number,
+  completionReviewId: string,
+  rejectReason: string,
+  reworkNodeId: string | null,
+): Promise<void> {
+  await apiRequest(`/api/v1/tasks/${taskId}/actions/reject-completion`, {
+    method: "POST",
+    body: JSON.stringify({
+      expected_task_version: version,
+      completion_review_id: completionReviewId,
+      reject_reason: rejectReason,
+      rework_node_id: reworkNodeId,
+    }),
+  });
+}
+
+export async function reopenNode(
+  taskId: string,
+  nodeId: string,
+  version: number,
+  completionReviewId: string,
+): Promise<void> {
+  await apiRequest(`/api/v1/tasks/${taskId}/nodes/${nodeId}/actions/reopen`, {
+    method: "POST",
+    body: JSON.stringify({
+      expected_task_version: version,
+      completion_review_id: completionReviewId,
     }),
   });
 }
