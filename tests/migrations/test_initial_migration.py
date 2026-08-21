@@ -21,16 +21,30 @@ EXPECTED_CREATE_ORDER = (
     "task_status_logs",
     "task_node_dependencies",
     "task_node_participants",
+    "task_progress_reports",
+    "task_issues",
+    "task_completion_reviews",
+    "task_change_requests",
+    "employee_profiles",
+    "performance_metrics",
+    "task_performance_matches",
+    "workload_snapshots",
+    "task_priority_scores",
+    "task_conflicts",
+    "reminder_rules",
+    "notifications",
+    "task_archives",
+    "operation_logs",
+    "user_authorized_scopes",
+    "system_parameters",
+    "auth_refresh_tokens",
 )
 EXPECTED_TABLES = set(EXPECTED_CREATE_ORDER)
 EXPECTED_DROP_ORDER = tuple(reversed(EXPECTED_CREATE_ORDER))
 FORBIDDEN_TABLES = {
     "boards",
-    "notifications",
-    "operation_logs",
     "outbox",
     "performance_records",
-    "task_issues",
     "workspaces",
 }
 
@@ -56,7 +70,7 @@ class OperationRecorder:
         table_name: str,
         columns: list[str],
         *,
-        unique: bool,
+        unique: bool = False,
         **kwargs: object,
     ) -> None:
         self.created_indexes.append(
@@ -81,6 +95,19 @@ class OperationRecorder:
     def drop_table(self, name: str) -> None:
         self.dropped_tables.append(name)
 
+    def execute(self, statement: object) -> None:
+        return None
+
+    def create_check_constraint(self, name: str, table_name: str, condition: str) -> None:
+        table = self.metadata.tables[table_name]
+        table.append_constraint(sa.CheckConstraint(condition, name=name))
+
+    def drop_constraint(self, name: str, table_name: str, **kwargs: object) -> None:
+        return None
+
+    def bulk_insert(self, table: sa.Table, rows: list[dict[str, object]]) -> None:
+        return None
+
 
 def _migration_files() -> list[Path]:
     return sorted(MIGRATION_DIRECTORY.glob("*.py"))
@@ -98,12 +125,15 @@ def _load_migration(path: Path) -> ModuleType:
 
 
 def _record_migration() -> tuple[ModuleType, OperationRecorder]:
-    module = _load_migration(_migration_files()[0])
     recorder = OperationRecorder()
-    module.op = recorder
-    module.upgrade()
-    module.downgrade()
-    return module, recorder
+    modules = [_load_migration(path) for path in _migration_files()]
+    for module in modules:
+        module.op = recorder
+        module.upgrade()
+    for module in reversed(modules):
+        module.op = recorder
+        module.downgrade()
+    return modules[0], recorder
 
 
 def _normalize_sql(value: object) -> str:
@@ -174,7 +204,7 @@ def _migration_index_signatures(
 def test_initial_migration_is_the_only_importable_root_revision() -> None:
     files = _migration_files()
 
-    assert len(files) == 3
+    assert len(files) == 6
     modules = [_load_migration(path) for path in files]
     roots = [module for module in modules if module.down_revision is None]
     assert len(roots) == 1
@@ -220,12 +250,6 @@ def test_initial_migration_constraints_match_model_metadata() -> None:
 
     for table_name in EXPECTED_TABLES:
         model_signatures = _constraint_signatures(Base.metadata.tables[table_name])
-        if table_name == "tasks":
-            model_signatures = {
-                signature
-                for signature in model_signatures
-                if signature[1] != "ck_tasks_report_cycle_format"
-            }
         assert _constraint_signatures(
             recorder.metadata.tables[table_name]
         ) == model_signatures

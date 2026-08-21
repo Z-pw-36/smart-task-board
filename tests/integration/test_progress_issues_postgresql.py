@@ -28,10 +28,19 @@ pytestmark = pytest.mark.postgresql
 EXPECTED_DATABASE = "smarttaskboard_core_test"
 EXPECTED_HOST = "127.0.0.1"
 EXPECTED_PORT = 46479
-EXPECTED_REVISION = "c31f8e7a4d02"
+EXPECTED_REVISION = "f7b8c9d0e1f2"
 EXPECTED_TABLES = {
     "ai_extraction_records",
+    "auth_refresh_tokens",
     "departments",
+    "employee_profiles",
+    "notifications",
+    "operation_logs",
+    "performance_metrics",
+    "reminder_rules",
+    "system_parameters",
+    "task_archives",
+    "task_conflicts",
     "task_inputs",
     "task_issues",
     "task_node_dependencies",
@@ -39,10 +48,15 @@ EXPECTED_TABLES = {
     "task_nodes",
     "task_participants",
     "task_completion_reviews",
+    "task_change_requests",
     "task_progress_reports",
     "task_status_logs",
     "tasks",
+    "task_performance_matches",
+    "task_priority_scores",
+    "user_authorized_scopes",
     "users",
+    "workload_snapshots",
 }
 NOW = datetime(2026, 8, 19, 2, 0, tzinfo=UTC)
 

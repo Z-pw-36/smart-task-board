@@ -17,6 +17,7 @@ from app.db.unit_of_work import UnitOfWork
 from app.models import (
     AIExtractionRecord,
     Department,
+    OperationLog,
     Task,
     TaskCompletionReview,
     TaskInput,
@@ -48,21 +49,35 @@ pytestmark = pytest.mark.postgresql
 EXPECTED_DATABASE = "smarttaskboard_core_test"
 EXPECTED_HOST = "127.0.0.1"
 EXPECTED_PORT = 46479
-EXPECTED_REVISION = "c31f8e7a4d02"
+EXPECTED_REVISION = "f7b8c9d0e1f2"
 EXPECTED_TABLES = {
     "ai_extraction_records",
+    "auth_refresh_tokens",
     "departments",
+    "employee_profiles",
+    "notifications",
+    "operation_logs",
+    "performance_metrics",
+    "reminder_rules",
+    "system_parameters",
+    "task_archives",
+    "task_conflicts",
     "task_inputs",
     "task_node_dependencies",
     "task_node_participants",
     "task_nodes",
     "task_participants",
     "task_completion_reviews",
+    "task_change_requests",
     "task_progress_reports",
     "task_issues",
     "task_status_logs",
     "tasks",
+    "task_performance_matches",
+    "task_priority_scores",
+    "user_authorized_scopes",
     "users",
+    "workload_snapshots",
 }
 
 
@@ -147,6 +162,12 @@ def phase4_records(phase4_engine: Engine) -> Iterator[Phase4Records]:
     yield records
     with phase4_engine.begin() as connection:
         task_ids = records.task_ids
+        if records.employee_nos:
+            connection.execute(
+                delete(OperationLog).where(
+                    OperationLog.operator_employee_no.in_(records.employee_nos)
+                )
+            )
         if task_ids:
             connection.execute(
                 delete(TaskStatusLog).where(TaskStatusLog.task_id.in_(task_ids))

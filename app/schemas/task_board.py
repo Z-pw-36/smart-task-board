@@ -1,6 +1,8 @@
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 from uuid import UUID
+
+from pydantic import Field
 
 from app.schemas.common import StrictSchema, TaskStatus
 
@@ -19,6 +21,16 @@ type AllowedAction = Literal[
     "approve_completion",
     "reject_completion",
     "reopen_node",
+    "submit_change_request",
+    "approve_change_request",
+    "reject_change_request",
+    "cancel_change_request",
+    "cancel_task",
+    "withdraw_task",
+    "merge_task",
+    "close_task",
+    "archive_task",
+    "restore_task",
     "submit_progress_report",
     "report_task_issue",
     "start_processing_issue",
@@ -36,8 +48,21 @@ type InboxActionCode = Literal[
     "submit_completion",
     "approve_completion",
     "reopen_node",
+    "approve_change_request",
+    "cancel_change_request",
+    "withdraw_task",
     "report_due",
     "handle_issue",
+    "submit_change_request",
+    "approve_change_request",
+    "reject_change_request",
+    "cancel_change_request",
+    "cancel_task",
+    "withdraw_task",
+    "merge_task",
+    "close_task",
+    "archive_task",
+    "restore_task",
 ]
 
 
@@ -117,9 +142,17 @@ class DashboardSummaryResponse(StrictSchema):
     assigned_task_count: int
     inbox_count: int
     in_progress_count: int
+    pending_acceptance_count: int = 0
+    today_task_count: int = 0
     due_within_7_days_count: int
     overdue_count: int
     report_due_count: int
     open_issue_count: int
+    blocked_task_count: int = 0
+    completion_review_count: int = 0
+    unread_notification_count: int = 0
+    open_conflict_count: int = 0
     due_window_days: int = 7
     recent_tasks: list[TaskBoardSummaryResponse]
+    latest_workload: dict[str, Any] | None = None
+    priority_items: list[dict[str, Any]] = Field(default_factory=list)

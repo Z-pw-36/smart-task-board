@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from app.models import (
     AIExtractionRecord,
     Task,
+    TaskChangeRequest,
     TaskCompletionReview,
     TaskNode,
     TaskNodeDependency,
@@ -17,11 +18,13 @@ from app.models import (
 )
 from app.repositories import (
     AIExtractionRecordRepository,
+    TaskChangeRequestRepository,
     TaskCompletionReviewRepository,
     TaskNodeRepository,
     TaskRepository,
     TaskStatusLogRepository,
 )
+from app.services.business_capabilities import PermissionScopeService
 from app.services.errors import (
     BusinessValidationError,
     EntityNotFoundError,
@@ -38,6 +41,7 @@ class TaskQueryService:
         self._nodes = TaskNodeRepository(session)
         self._logs = TaskStatusLogRepository(session)
         self._completion_reviews = TaskCompletionReviewRepository(session)
+        self._change_requests = TaskChangeRequestRepository(session)
         self._extractions = AIExtractionRecordRepository(session)
 
     def get_task_detail(self, task_id: UUID, actor_employee_no: str) -> dict[str, Any]:
@@ -53,6 +57,10 @@ class TaskQueryService:
             node_participants=[self._node_participant_dict(item) for item in node_participants],
             ai_extraction_records=[
                 self._extraction_dict(item) for item in self._extractions.list_by_task_id(task_id)
+            ],
+            change_requests=[
+                self._change_request_dict(item)
+                for item in self._change_requests.list_by_task_id(task_id)
             ],
         )
         return result
@@ -163,6 +171,43 @@ class TaskQueryService:
             raise EntityNotFoundError("completion review was not found")
         return self._completion_review_dict(review)
 
+    def list_change_requests(
+        self,
+        task_id: UUID,
+        actor_employee_no: str,
+        *,
+        limit: int,
+        offset: int,
+    ) -> dict[str, Any]:
+        if not 1 <= limit <= 100:
+            raise BusinessValidationError("limit must be between 1 and 100")
+        if offset < 0:
+            raise BusinessValidationError("offset must not be negative")
+        self._require_task_read_access(task_id, actor_employee_no)
+        items = self._change_requests.list_by_task_id(
+            task_id,
+            limit=limit,
+            offset=offset,
+        )
+        return {
+            "items": [self._change_request_dict(item) for item in items],
+            "limit": limit,
+            "offset": offset,
+            "total": self._change_requests.count_by_task_id(task_id),
+        }
+
+    def get_change_request(
+        self,
+        task_id: UUID,
+        change_request_id: UUID,
+        actor_employee_no: str,
+    ) -> dict[str, Any]:
+        self._require_task_read_access(task_id, actor_employee_no)
+        request = self._change_requests.get_by_id(change_request_id)
+        if request is None or request.task_id != task_id:
+            raise EntityNotFoundError("task change request was not found")
+        return self._change_request_dict(request)
+
     def _require_task_read_access(
         self,
         task_id: UUID,
@@ -172,7 +217,10 @@ class TaskQueryService:
         task = self._tasks.get_by_id(task_id)
         if task is None:
             raise EntityNotFoundError("task was not found")
-        if not self._tasks.is_related(task_id, actor_employee_no):
+        if not self._tasks.is_related(
+            task_id,
+            actor_employee_no,
+        ) and not PermissionScopeService(self._session).can_access_task(actor_employee_no, task):
             raise PermissionDeniedError("actor cannot read this task")
         return task
 
@@ -343,5 +391,28 @@ class TaskQueryService:
             "submitted_at",
             "reviewed_at",
             "is_legacy_import",
+        )
+        return {field: getattr(item, field) for field in fields}
+
+    @staticmethod
+    def _change_request_dict(item: TaskChangeRequest) -> dict[str, Any]:
+        fields = (
+            "change_request_id",
+            "task_id",
+            "requester_employee_no",
+            "patch_json",
+            "reason",
+            "before_snapshot",
+            "after_snapshot",
+            "status",
+            "decision_by_employee_no",
+            "decision_at",
+            "decision_comment",
+            "cancelled_by_employee_no",
+            "cancelled_at",
+            "cancellation_reason",
+            "requester_task_version",
+            "base_task_version",
+            "created_at",
         )
         return {field: getattr(item, field) for field in fields}

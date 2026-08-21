@@ -66,6 +66,71 @@ describe("InboxPage", () => {
     );
   });
 
+  it("routes change request approval through the explicit approval endpoint", async () => {
+    const changeRequestItem = {
+      inbox_item_type: "approve_change_request",
+      action_code: "approve_change_request",
+      task: taskSummary,
+      node: null,
+      reason: "A pending change request needs a decision",
+      expected_task_version: 4,
+      endpoint: "/api/v1/tasks/22222222-2222-4222-8222-222222222222/change-requests/55555555-5555-4555-8555-555555555555/actions",
+      allowed_actions: ["approve_change_request"],
+      is_overdue: false,
+      relevant_at: "2026-08-18T09:00:00Z",
+    };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ items: [changeRequestItem], limit: 20, offset: 0, total: 1 }))
+      .mockResolvedValue(jsonResponse({ status: "in_progress" }));
+    vi.stubGlobal("fetch", fetchMock);
+    renderPage(<InboxPage />);
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByRole("button", { name: "批准变更" }));
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "http://localhost:8000/api/v1/tasks/22222222-2222-4222-8222-222222222222/change-requests/55555555-5555-4555-8555-555555555555/actions/approve",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ expected_task_version: 4, approval_comment: null }),
+      }),
+    );
+  });
+
+  it("prompts for a cancellation reason before posting a change request cancellation", async () => {
+    const changeRequestItem = {
+      inbox_item_type: "cancel_change_request",
+      action_code: "cancel_change_request",
+      task: taskSummary,
+      node: null,
+      reason: "Cancel the pending request",
+      expected_task_version: 4,
+      endpoint: "/api/v1/tasks/22222222-2222-4222-8222-222222222222/change-requests/55555555-5555-4555-8555-555555555555/actions",
+      allowed_actions: ["cancel_change_request"],
+      is_overdue: false,
+      relevant_at: "2026-08-18T09:00:00Z",
+    };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ items: [changeRequestItem], limit: 20, offset: 0, total: 1 }))
+      .mockResolvedValue(jsonResponse({ status: "in_progress" }));
+    vi.stubGlobal("fetch", fetchMock);
+    vi.spyOn(window, "prompt").mockReturnValue("需求已调整");
+    renderPage(<InboxPage />);
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByRole("button", { name: "取消变更申请" }));
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "http://localhost:8000/api/v1/tasks/22222222-2222-4222-8222-222222222222/change-requests/55555555-5555-4555-8555-555555555555/actions/cancel",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ expected_task_version: 4, reason: "需求已调整" }),
+      }),
+    );
+  });
+
   it("navigates completion submit, review, and reopen work to the rich detail flow", async () => {
     const taskId = taskSummary.task_id;
     const base = {

@@ -10,7 +10,9 @@ from app.db.base import Base
 
 if TYPE_CHECKING:
     from app.models.department import Department
+    from app.models.extended import EmployeeProfile
     from app.models.task import Task
+    from app.models.task_change_request import TaskChangeRequest
     from app.models.task_completion_review import TaskCompletionReview
     from app.models.task_input import TaskInput
     from app.models.task_issue import TaskIssue
@@ -50,6 +52,11 @@ class User(Base):
     role_type: Mapped[str] = mapped_column(String, nullable=False)
     status: Mapped[str] = mapped_column(String, nullable=False, index=True)
 
+    employee_profile: Mapped[EmployeeProfile | None] = relationship(
+        back_populates="employee",
+        foreign_keys="EmployeeProfile.employee_no",
+        uselist=False,
+    )
     department: Mapped[Department | None] = relationship(
         back_populates="users",
         foreign_keys=[department_id],
@@ -134,4 +141,16 @@ class User(Base):
     assigned_completion_reviews: Mapped[list[TaskCompletionReview]] = relationship(
         back_populates="reviewer",
         foreign_keys="TaskCompletionReview.reviewer_employee_no",
+    )
+    submitted_change_requests: Mapped[list[TaskChangeRequest]] = relationship(
+        back_populates="requester",
+        foreign_keys="TaskChangeRequest.requester_employee_no",
+    )
+    decided_change_requests: Mapped[list[TaskChangeRequest]] = relationship(
+        back_populates="decision_by",
+        foreign_keys="TaskChangeRequest.decision_by_employee_no",
+    )
+    cancelled_change_requests: Mapped[list[TaskChangeRequest]] = relationship(
+        back_populates="cancelled_by",
+        foreign_keys="TaskChangeRequest.cancelled_by_employee_no",
     )

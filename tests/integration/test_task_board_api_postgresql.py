@@ -20,6 +20,7 @@ from app.main import app
 from app.models import (
     AIExtractionRecord,
     Department,
+    OperationLog,
     Task,
     TaskCompletionReview,
     TaskNode,
@@ -35,21 +36,35 @@ pytestmark = pytest.mark.postgresql
 EXPECTED_DATABASE = "smarttaskboard_core_test"
 EXPECTED_HOST = "127.0.0.1"
 EXPECTED_PORT = 46479
-EXPECTED_REVISION = "c31f8e7a4d02"
+EXPECTED_REVISION = "f7b8c9d0e1f2"
 EXPECTED_TABLES = {
     "ai_extraction_records",
+    "auth_refresh_tokens",
     "departments",
+    "employee_profiles",
+    "notifications",
+    "operation_logs",
+    "performance_metrics",
+    "reminder_rules",
+    "system_parameters",
+    "task_archives",
+    "task_conflicts",
     "task_inputs",
     "task_node_dependencies",
     "task_node_participants",
     "task_nodes",
     "task_participants",
     "task_completion_reviews",
+    "task_change_requests",
     "task_progress_reports",
     "task_issues",
     "task_status_logs",
     "tasks",
+    "task_performance_matches",
+    "task_priority_scores",
+    "user_authorized_scopes",
     "users",
+    "workload_snapshots",
 }
 FORBIDDEN_RESPONSE_KEYS = {
     "database_url",
@@ -266,6 +281,11 @@ def _cleanup_and_count(
 ) -> int:
     with engine.begin() as connection:
         if task_ids:
+            connection.execute(
+                delete(OperationLog).where(
+                    OperationLog.operator_employee_no.in_(refs.employee_nos)
+                )
+            )
             connection.execute(
                 delete(TaskStatusLog).where(TaskStatusLog.task_id.in_(task_ids))
             )
@@ -491,7 +511,9 @@ def test_batch1_real_bearer_task_board_workflow_and_cleanup(
                 str(beta_id)
             ]
             assert creator_page.json()["items"][0]["allowed_actions"] == [
-                "submit_for_confirmation"
+                "submit_for_confirmation",
+                "cancel_task",
+                "merge_task",
             ]
             _assert_safe_response(creator_page.json())
 
@@ -543,12 +565,20 @@ def test_batch1_real_bearer_task_board_workflow_and_cleanup(
                 "assigned_task_count": 0,
                 "inbox_count": 0,
                 "in_progress_count": 0,
+                "pending_acceptance_count": 0,
+                "today_task_count": 0,
                 "due_within_7_days_count": 0,
                 "overdue_count": 0,
                 "report_due_count": 0,
                 "open_issue_count": 0,
+                "blocked_task_count": 0,
+                "completion_review_count": 0,
+                "unread_notification_count": 0,
+                "open_conflict_count": 0,
                 "due_window_days": 7,
                 "recent_tasks": [],
+                "latest_workload": None,
+                "priority_items": [],
             }
             _assert_safe_response(creator_dashboard.json())
 
@@ -558,7 +588,9 @@ def test_batch1_real_bearer_task_board_workflow_and_cleanup(
             )
             assert draft_actions.status_code == 200
             assert draft_actions.json()["allowed_actions"] == [
-                "submit_for_confirmation"
+                "submit_for_confirmation",
+                "cancel_task",
+                "merge_task",
             ]
             assert all(
                 not node["allowed_actions"] for node in draft_actions.json()["nodes"]
@@ -802,13 +834,18 @@ def test_batch1_real_bearer_task_board_workflow_and_cleanup(
                 "completed",
             )
 
-            for token in (creator_token, assignee_token, reviewer_token):
+            expected_completed_actions = {
+                creator_token: ["close_task", "archive_task", "merge_task"],
+                assignee_token: [],
+                reviewer_token: [],
+            }
+            for token, expected_actions in expected_completed_actions.items():
                 completed_actions = client.get(
                     f"/api/v1/tasks/{alpha_id}/available-actions",
                     headers=_bearer(token),
                 )
                 assert completed_actions.status_code == 200
-                assert completed_actions.json()["allowed_actions"] == []
+                assert completed_actions.json()["allowed_actions"] == expected_actions
                 assert all(
                     not item["allowed_actions"]
                     for item in completed_actions.json()["nodes"]

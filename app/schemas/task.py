@@ -11,6 +11,7 @@ from app.schemas.common import (
     StrictSchema,
     TaskStatus,
 )
+from app.schemas.task_change_request import TaskChangeRequestResponse
 from app.schemas.task_node import (
     TaskNodeDependencyDraftRequest,
     TaskNodeDependencyResponse,
@@ -31,6 +32,7 @@ class TaskParticipantDraftRequest(StrictSchema):
 
 
 class CreateTaskRequest(StrictSchema):
+    task_id: UUID | None = None
     task_name: NonBlankString
     task_description: str | None = None
     task_goal: str | None = None
@@ -87,6 +89,10 @@ class TaskActionRequest(StrictSchema):
 
 
 class ReturnTaskRequest(TaskActionRequest):
+    reason: NonBlankString
+
+
+class ReasonTaskActionRequest(TaskActionRequest):
     reason: NonBlankString
 
 
@@ -159,6 +165,7 @@ class TaskDetailResponse(StrictSchema):
     dependencies: list[TaskNodeDependencyResponse]
     node_participants: list[TaskNodeParticipantResponse]
     ai_extraction_records: list[AIExtractionRecordSummaryResponse]
+    change_requests: list[TaskChangeRequestResponse] = Field(default_factory=list)
 
 
 class TaskStatusLogResponse(StrictSchema):

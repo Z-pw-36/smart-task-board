@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     app_timezone: str = "Asia/Shanghai"
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
     database_url: str = Field(repr=False)
+    database_connect_timeout_seconds: int = Field(default=5, ge=1, le=60)
     auth_mode: Literal["disabled", "prototype", "test_header"] = "test_header"
     prototype_auth_enabled: bool = False
     prototype_user_employee_nos: str = ""

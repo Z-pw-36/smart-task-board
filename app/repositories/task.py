@@ -257,6 +257,9 @@ class TaskRepository:
         self.session.flush()
         return participant
 
+    def delete_participant(self, participant: TaskParticipant) -> None:
+        self.session.delete(participant)
+
     def get_participant(self, participant_id: UUID) -> TaskParticipant | None:
         statement = select(TaskParticipant).where(
             TaskParticipant.participant_id == participant_id

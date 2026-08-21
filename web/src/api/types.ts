@@ -5,7 +5,12 @@ export type TaskStatus =
   | "returned"
   | "in_progress"
   | "pending_review"
-  | "completed";
+  | "completed"
+  | "archived"
+  | "cancelled"
+  | "withdrawn"
+  | "merged"
+  | "closed";
 
 export type AllowedAction =
   | "submit_for_confirmation"
@@ -21,6 +26,16 @@ export type AllowedAction =
   | "approve_completion"
   | "reject_completion"
   | "reopen_node"
+  | "submit_change_request"
+  | "approve_change_request"
+  | "reject_change_request"
+  | "cancel_change_request"
+  | "cancel_task"
+  | "withdraw_task"
+  | "merge_task"
+  | "close_task"
+  | "archive_task"
+  | "restore_task"
   | "submit_progress_report"
   | "report_task_issue"
   | "start_processing_issue"
@@ -204,6 +219,33 @@ export interface TaskCompletionReviewPage {
   total: number;
 }
 
+export interface TaskChangeRequest {
+  change_request_id: string;
+  task_id: string;
+  requester_employee_no: string;
+  patch_json: Record<string, unknown>;
+  reason: string;
+  before_snapshot: Record<string, unknown>;
+  after_snapshot: Record<string, unknown>;
+  status: "pending" | "approved" | "rejected" | "cancelled";
+  decision_by_employee_no: string | null;
+  decision_at: string | null;
+  decision_comment: string | null;
+  cancelled_by_employee_no: string | null;
+  cancelled_at: string | null;
+  cancellation_reason: string | null;
+  requester_task_version: number;
+  base_task_version: number;
+  created_at: string;
+}
+
+export interface TaskChangeRequestPage {
+  items: TaskChangeRequest[];
+  limit: number;
+  offset: number;
+  total: number;
+}
+
 export interface TaskNode {
   node_id: string;
   task_id: string;
@@ -247,6 +289,10 @@ export interface TaskDetail {
   acceptance_criteria: string | null;
   is_urgent: boolean | null;
   report_cycle: string | null;
+  cancel_reason?: string | null;
+  withdraw_reason?: string | null;
+  close_reason?: string | null;
+  merged_into_task_id?: string | null;
   task_version: number;
   created_at: string;
   updated_at: string;
@@ -264,6 +310,13 @@ export interface TaskDetail {
     employee_no: string;
     participant_role: string;
   }>;
+  change_requests: TaskChangeRequest[];
+  confirmed_at?: string | null;
+  sent_at?: string | null;
+  accepted_at?: string | null;
+  completed_at?: string | null;
+  archived_at?: string | null;
+  ai_extraction_records?: Array<Record<string, unknown>>;
 }
 
 export interface AvailableActions {

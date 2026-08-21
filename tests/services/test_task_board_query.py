@@ -321,7 +321,13 @@ def test_inbox_projects_issue_owner_actions_and_issue_relation() -> None:
 
 
 def test_dashboard_uses_bounded_real_time_counts_and_seven_day_window() -> None:
-    service = TaskBoardQueryService(MagicMock(), clock=lambda: NOW)
+    session = MagicMock()
+    count_result = MagicMock()
+    count_result.scalar_one.side_effect = [2, 1]
+    session.execute.return_value = count_result
+    session.execute.return_value.scalar_one_or_none.return_value = None
+    session.scalars.return_value.all.return_value = []
+    service = TaskBoardQueryService(session, clock=lambda: NOW)
     service._tasks = MagicMock()
     service._nodes = MagicMock()
     service._users = MagicMock()
@@ -334,17 +340,26 @@ def test_dashboard_uses_bounded_real_time_counts_and_seven_day_window() -> None:
     service._issues.count_open_owned_by.return_value = 6
     service._tasks.list_recent_related.return_value = []
     service._tasks.list_inbox_candidates.return_value = []
-    service._tasks.count_related.side_effect = [2, 3, 4, 5, 1]
+    service._tasks.list_related.return_value = ([], 0)
+    service._tasks.count_related.side_effect = [2, 3, 4, 5, 7, 8, 1]
     result = service.dashboard_summary("E-CREATOR")
     assert result == {
         "created_task_count": 2,
         "assigned_task_count": 3,
         "inbox_count": 0,
         "in_progress_count": 4,
-        "due_within_7_days_count": 5,
+        "pending_acceptance_count": 5,
+        "today_task_count": 7,
+        "due_within_7_days_count": 8,
         "overdue_count": 1,
         "report_due_count": 0,
         "open_issue_count": 6,
+        "blocked_task_count": 6,
+        "completion_review_count": 0,
+        "unread_notification_count": 2,
+        "open_conflict_count": 1,
         "due_window_days": 7,
         "recent_tasks": [],
+        "latest_workload": None,
+        "priority_items": [],
     }

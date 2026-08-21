@@ -16,6 +16,11 @@ type TaskStatus = Literal[
     "in_progress",
     "pending_review",
     "completed",
+    "archived",
+    "cancelled",
+    "withdrawn",
+    "merged",
+    "closed",
 ]
 type TaskNodeStatus = Literal["pending", "in_progress", "completed"]
 type ParticipantConfirmStatus = Literal["pending", "accepted", "returned"]

@@ -10,20 +10,30 @@ from app.api.dependencies import (
     get_task_workflow_service,
 )
 from app.schemas import (
+    CancelTaskChangeRequest,
     CompletionDecisionRequest,
     CompletionReviewActionResponse,
     CompletionReviewResponse,
     CreateTaskRequest,
     ErrorResponse,
+    MergeTaskRequest,
     NodeActionResponse,
     PaginatedCompletionReviewResponse,
+    PaginatedTaskChangeRequestResponse,
     PaginatedTaskStatusLogResponse,
+    ReasonTaskActionRequest,
     RejectCompletionRequest,
     ReopenNodeRequest,
+    RestoreTaskRequest,
     ReturnTaskRequest,
     SubmitCompletionRequest,
     TaskActionRequest,
     TaskActionResponse,
+    TaskChangeRequestActionResponse,
+    TaskChangeRequestCreate,
+    TaskChangeRequestDecisionRequest,
+    TaskChangeRequestRejectRequest,
+    TaskChangeRequestResponse,
     TaskDetailResponse,
     TaskNodeResponse,
     UpdateNodeProgressRequest,
@@ -60,6 +70,7 @@ QueryService = Annotated[TaskQueryService, Depends(get_task_query_service)]
 def _create_command(request: CreateTaskRequest, actor: str) -> CreateTaskDraftCommand:
     scalar_values = request.model_dump(
         exclude={
+            "task_id",
             "participants",
             "nodes",
             "dependencies",
@@ -67,22 +78,25 @@ def _create_command(request: CreateTaskRequest, actor: str) -> CreateTaskDraftCo
             "extraction_record_ids",
         }
     )
-    return CreateTaskDraftCommand(
+    command_values = {
         **scalar_values,
-        creator_employee_no=actor,
-        operation_source=OPERATION_SOURCE,
-        participants=tuple(
+        "creator_employee_no": actor,
+        "operation_source": OPERATION_SOURCE,
+        "participants": tuple(
             TaskParticipantDraft(**item.model_dump()) for item in request.participants
         ),
-        nodes=tuple(TaskNodeDraft(**item.model_dump()) for item in request.nodes),
-        dependencies=tuple(
+        "nodes": tuple(TaskNodeDraft(**item.model_dump()) for item in request.nodes),
+        "dependencies": tuple(
             TaskNodeDependencyDraft(**item.model_dump()) for item in request.dependencies
         ),
-        node_participants=tuple(
+        "node_participants": tuple(
             TaskNodeParticipantDraft(**item.model_dump()) for item in request.node_participants
         ),
-        extraction_record_ids=request.extraction_record_ids,
-    )
+        "extraction_record_ids": request.extraction_record_ids,
+    }
+    if request.task_id is not None:
+        command_values["task_id"] = request.task_id
+    return CreateTaskDraftCommand(**command_values)
 
 
 @router.post(
@@ -217,6 +231,291 @@ def _completion_response(result: Any) -> CompletionReviewActionResponse:
         task_version=task.task_version,
         updated_at=task.updated_at,
         review=CompletionReviewResponse.model_validate(review),
+    )
+
+
+def _change_request_response(result: Any) -> TaskChangeRequestActionResponse:
+    task, request = result
+    return TaskChangeRequestActionResponse(
+        task_id=task.task_id,
+        status=task.status,
+        task_version=task.task_version,
+        updated_at=task.updated_at,
+        change_request=TaskChangeRequestResponse.model_validate(request),
+    )
+
+
+@router.post(
+    "/{task_id}/change-requests",
+    response_model=TaskChangeRequestActionResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Submit an immutable task change request",
+    responses=ERROR_RESPONSES,
+)
+def submit_change_request(
+    task_id: UUID,
+    request: TaskChangeRequestCreate,
+    actor: Actor,
+    service: TaskService,
+) -> TaskChangeRequestActionResponse:
+    return _change_request_response(
+        service.submit_change_request(
+            task_id,
+            actor,
+            request.expected_task_version,
+            OPERATION_SOURCE,
+            request.patch_json,
+            request.reason,
+        )
+    )
+
+
+@router.get(
+    "/{task_id}/change-requests",
+    response_model=PaginatedTaskChangeRequestResponse,
+    summary="List immutable task change requests",
+    responses=ERROR_RESPONSES,
+)
+def list_change_requests(
+    task_id: UUID,
+    actor: Actor,
+    query_service: QueryService,
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> dict[str, Any]:
+    return query_service.list_change_requests(
+        task_id,
+        actor,
+        limit=limit,
+        offset=offset,
+    )
+
+
+@router.get(
+    "/{task_id}/change-requests/{change_request_id}",
+    response_model=TaskChangeRequestResponse,
+    summary="Get one task change request",
+    responses=ERROR_RESPONSES,
+)
+def get_change_request(
+    task_id: UUID,
+    change_request_id: UUID,
+    actor: Actor,
+    query_service: QueryService,
+) -> dict[str, Any]:
+    return query_service.get_change_request(task_id, change_request_id, actor)
+
+
+@router.post(
+    "/{task_id}/change-requests/{change_request_id}/actions/approve",
+    response_model=TaskChangeRequestActionResponse,
+    summary="Approve and atomically apply a task change request",
+    responses=ERROR_RESPONSES,
+)
+def approve_change_request(
+    task_id: UUID,
+    change_request_id: UUID,
+    request: TaskChangeRequestDecisionRequest,
+    actor: Actor,
+    service: TaskService,
+) -> TaskChangeRequestActionResponse:
+    return _change_request_response(
+        service.approve_change_request(
+            task_id,
+            actor,
+            request.expected_task_version,
+            OPERATION_SOURCE,
+            change_request_id,
+            request.approval_comment,
+        )
+    )
+
+
+@router.post(
+    "/{task_id}/change-requests/{change_request_id}/actions/reject",
+    response_model=TaskChangeRequestActionResponse,
+    summary="Reject a task change request",
+    responses=ERROR_RESPONSES,
+)
+def reject_change_request(
+    task_id: UUID,
+    change_request_id: UUID,
+    request: TaskChangeRequestRejectRequest,
+    actor: Actor,
+    service: TaskService,
+) -> TaskChangeRequestActionResponse:
+    return _change_request_response(
+        service.reject_change_request(
+            task_id,
+            actor,
+            request.expected_task_version,
+            OPERATION_SOURCE,
+            change_request_id,
+            request.reason,
+        )
+    )
+
+
+@router.post(
+    "/{task_id}/change-requests/{change_request_id}/actions/cancel",
+    response_model=TaskChangeRequestActionResponse,
+    summary="Cancel a pending task change request",
+    responses=ERROR_RESPONSES,
+)
+def cancel_change_request(
+    task_id: UUID,
+    change_request_id: UUID,
+    request: CancelTaskChangeRequest,
+    actor: Actor,
+    service: TaskService,
+) -> TaskChangeRequestActionResponse:
+    return _change_request_response(
+        service.cancel_change_request(
+            task_id,
+            actor,
+            request.expected_task_version,
+            OPERATION_SOURCE,
+            change_request_id,
+            request.reason,
+        )
+    )
+
+
+@router.post(
+    "/{task_id}/actions/cancel",
+    response_model=TaskActionResponse,
+    summary="Cancel a task",
+    responses=ERROR_RESPONSES,
+)
+def cancel_task(
+    task_id: UUID,
+    request: ReasonTaskActionRequest,
+    actor: Actor,
+    service: TaskService,
+) -> TaskActionResponse:
+    return _task_response(
+        service.cancel_task(
+            task_id,
+            actor,
+            request.expected_task_version,
+            OPERATION_SOURCE,
+            request.reason,
+        )
+    )
+
+
+@router.post(
+    "/{task_id}/actions/withdraw",
+    response_model=TaskActionResponse,
+    summary="Withdraw a task",
+    responses=ERROR_RESPONSES,
+)
+def withdraw_task(
+    task_id: UUID,
+    request: ReasonTaskActionRequest,
+    actor: Actor,
+    service: TaskService,
+) -> TaskActionResponse:
+    return _task_response(
+        service.withdraw_task(
+            task_id,
+            actor,
+            request.expected_task_version,
+            OPERATION_SOURCE,
+            request.reason,
+        )
+    )
+
+
+@router.post(
+    "/{task_id}/actions/close",
+    response_model=TaskActionResponse,
+    summary="Close an invalid or obsolete task",
+    responses=ERROR_RESPONSES,
+)
+def close_task(
+    task_id: UUID,
+    request: ReasonTaskActionRequest,
+    actor: Actor,
+    service: TaskService,
+) -> TaskActionResponse:
+    return _task_response(
+        service.close_task(
+            task_id,
+            actor,
+            request.expected_task_version,
+            OPERATION_SOURCE,
+            request.reason,
+        )
+    )
+
+
+@router.post(
+    "/{task_id}/actions/archive",
+    response_model=TaskActionResponse,
+    summary="Move a completed task to the archive-eligible state",
+    responses=ERROR_RESPONSES,
+)
+def archive_task(
+    task_id: UUID,
+    request: TaskActionRequest,
+    actor: Actor,
+    service: TaskService,
+) -> TaskActionResponse:
+    return _task_response(
+        service.archive_task(
+            task_id,
+            actor,
+            request.expected_task_version,
+            OPERATION_SOURCE,
+        )
+    )
+
+
+@router.post(
+    "/{task_id}/actions/restore",
+    response_model=TaskActionResponse,
+    summary="Restore a task to a safe lifecycle state",
+    responses=ERROR_RESPONSES,
+)
+def restore_task(
+    task_id: UUID,
+    request: RestoreTaskRequest,
+    actor: Actor,
+    service: TaskService,
+) -> TaskActionResponse:
+    return _task_response(
+        service.restore_task(
+            task_id,
+            actor,
+            request.expected_task_version,
+            OPERATION_SOURCE,
+            request.reason,
+        )
+    )
+
+
+@router.post(
+    "/{task_id}/actions/merge",
+    response_model=TaskActionResponse,
+    summary="Merge a task into another task without deleting its history",
+    responses=ERROR_RESPONSES,
+)
+def merge_task(
+    task_id: UUID,
+    request: MergeTaskRequest,
+    actor: Actor,
+    service: TaskService,
+) -> TaskActionResponse:
+    return _task_response(
+        service.merge_task(
+            task_id,
+            actor,
+            request.expected_task_version,
+            OPERATION_SOURCE,
+            request.target_task_id,
+            request.reason,
+        )
     )
 
 

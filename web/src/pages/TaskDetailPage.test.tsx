@@ -1,5 +1,6 @@
 import { Route, Routes } from "react-router-dom";
 import { screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 import { jsonResponse, renderPage } from "../test/test-utils";
@@ -40,5 +41,61 @@ describe("TaskDetailPage", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("服务暂时不可用");
     expect(screen.getByRole("button", { name: "重试" })).toBeInTheDocument();
     expect(screen.queryByText("任务不存在")).not.toBeInTheDocument();
+  });
+
+  it("collects a required reason before posting a lifecycle cancellation", async () => {
+    const detail = {
+      task_id: taskId,
+      task_no: "TASK-001",
+      task_name: "可取消任务",
+      task_description: null,
+      task_goal: null,
+      task_source: null,
+      creator_employee_no: "E-CREATOR",
+      main_assignee_employee_no: "E-ASSIGNEE",
+      report_to_employee_no: null,
+      report_to_level: null,
+      reviewer_employee_no: null,
+      department_id: null,
+      status: "in_progress",
+      start_time: null,
+      deadline: null,
+      estimated_hours: null,
+      actual_hours: null,
+      task_weight: null,
+      deliverable: null,
+      acceptance_criteria: null,
+      is_urgent: false,
+      report_cycle: null,
+      task_version: 4,
+      created_at: "2026-08-18T08:00:00Z",
+      updated_at: "2026-08-18T09:00:00Z",
+      participants: [],
+      nodes: [],
+      dependencies: [],
+      node_participants: [],
+      change_requests: [],
+    };
+    const fetchMock = vi.fn().mockImplementation((url: string) => {
+      if (url.includes("available-actions")) {
+        return Promise.resolve(jsonResponse({ task_id: taskId, task_version: 4, allowed_actions: ["cancel_task"], nodes: [] }));
+      }
+      if (url.includes("actions/cancel")) return Promise.resolve(jsonResponse({ status: "cancelled" }));
+      if (url.includes("status-logs")) return Promise.resolve(jsonResponse({ items: [], limit: 50, offset: 0, total: 0 }));
+      return Promise.resolve(jsonResponse(detail));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderPage(<Routes><Route path="/tasks/:taskId" element={<TaskDetailPage />} /></Routes>, { route: `/tasks/${taskId}` });
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByRole("button", { name: "取消任务" }));
+    await user.type(screen.getByLabelText("操作原因"), "任务需求已撤销");
+    await user.click(screen.getByRole("button", { name: "确认取消任务" }));
+
+    const cancelCall = fetchMock.mock.calls.find(([url]) => String(url).includes("/actions/cancel"));
+    expect(cancelCall?.[1]).toEqual(expect.objectContaining({
+      method: "POST",
+      body: JSON.stringify({ expected_task_version: 4, reason: "任务需求已撤销" }),
+    }));
   });
 });

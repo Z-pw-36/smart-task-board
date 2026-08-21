@@ -16,6 +16,10 @@ export type TaskLifecycleAction = Exclude<
   | "resolve_issue"
   | "reject_issue"
   | "close_issue"
+  | "submit_change_request"
+  | "approve_change_request"
+  | "reject_change_request"
+  | "cancel_change_request"
 >;
 
 const actionPaths: Record<TaskLifecycleAction, string> = {
@@ -25,9 +29,25 @@ const actionPaths: Record<TaskLifecycleAction, string> = {
   accept: "accept",
   return: "return",
   resend: "resend",
+  cancel_task: "cancel",
+  withdraw_task: "withdraw",
+  close_task: "close",
+  archive_task: "archive",
+  restore_task: "restore",
+  merge_task: "merge",
 };
 
 export const actionLabels: Record<AllowedAction, string> = {
+  submit_change_request: "提交变更申请",
+  approve_change_request: "批准变更",
+  reject_change_request: "驳回变更",
+  cancel_change_request: "取消变更申请",
+  cancel_task: "取消任务",
+  withdraw_task: "撤回任务",
+  merge_task: "合并任务",
+  close_task: "关闭任务",
+  archive_task: "归档任务",
+  restore_task: "恢复任务",
   submit_for_confirmation: "提交确认",
   confirm_and_send: "确认并发送",
   confirm_self_assigned: "确认并开始",
@@ -56,6 +76,12 @@ const issueActionPaths: Partial<Record<AllowedAction, string>> = {
   close_issue: "close",
 };
 
+const changeRequestActionPaths: Partial<Record<AllowedAction, string>> = {
+  approve_change_request: "approve",
+  reject_change_request: "reject",
+  cancel_change_request: "cancel",
+};
+
 export async function runTaskAction(
   taskId: string,
   action: TaskLifecycleAction,
@@ -66,7 +92,56 @@ export async function runTaskAction(
     method: "POST",
     body: JSON.stringify({
       expected_task_version: version,
-      ...(action === "return" ? { reason } : {}),
+      ...(["return", "cancel_task", "withdraw_task", "close_task", "restore_task"].includes(action)
+        ? { reason }
+        : {}),
+    }),
+  });
+}
+
+export async function submitChangeRequest(
+  taskId: string,
+  version: number,
+  patch: Record<string, unknown>,
+  reason: string,
+): Promise<void> {
+  await apiRequest(`/api/v1/tasks/${taskId}/change-requests`, {
+    method: "POST",
+    body: JSON.stringify({ expected_task_version: version, patch_json: patch, reason }),
+  });
+}
+
+export async function decideChangeRequest(
+  taskId: string,
+  requestId: string,
+  version: number,
+  action: "approve" | "reject" | "cancel",
+  comment = "",
+): Promise<void> {
+  const body =
+    action === "cancel"
+      ? { expected_task_version: version, reason: comment }
+      : action === "reject"
+        ? { expected_task_version: version, reason: comment }
+        : { expected_task_version: version, approval_comment: comment || null };
+  await apiRequest(`/api/v1/tasks/${taskId}/change-requests/${requestId}/actions/${action}`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export async function mergeTask(
+  taskId: string,
+  targetTaskId: string,
+  version: number,
+  reason: string,
+): Promise<void> {
+  await apiRequest(`/api/v1/tasks/${taskId}/actions/merge`, {
+    method: "POST",
+    body: JSON.stringify({
+      expected_task_version: version,
+      target_task_id: targetTaskId,
+      reason,
     }),
   });
 }
@@ -158,17 +233,24 @@ export async function runInboxAction(
   reason?: string,
   progressPercent?: number,
 ): Promise<void> {
-  const issueActionPath = issueActionPaths[action];
-  await apiRequest(issueActionPath ? `${endpoint}/${issueActionPath}` : endpoint, {
+  const actionPath = issueActionPaths[action] || changeRequestActionPaths[action];
+  const target = actionPath && !endpoint.endsWith(`/${actionPath}`) ? `${endpoint}/${actionPath}` : endpoint;
+  const body =
+    action === "cancel_change_request"
+      ? { expected_task_version: version, reason }
+      : action === "reject_change_request"
+        ? { expected_task_version: version, reason }
+        : action === "approve_change_request"
+        ? { expected_task_version: version, approval_comment: reason || null }
+        : ["return", "cancel_task", "withdraw_task", "close_task", "restore_task"].includes(action)
+          ? { expected_task_version: version, reason }
+        : {
+            expected_task_version: version,
+            ...(issueActionPaths[action] && action !== "start_processing_issue" ? { reason } : {}),
+            ...(action === "update_node_progress" ? { progress_percent: progressPercent } : {}),
+          };
+  await apiRequest(target, {
     method: action === "update_node_progress" ? "PATCH" : "POST",
-    body: JSON.stringify({
-      expected_task_version: version,
-      ...(
-        action === "return" || (issueActionPath && action !== "start_processing_issue")
-          ? { reason }
-          : {}
-      ),
-      ...(action === "update_node_progress" ? { progress_percent: progressPercent } : {}),
-    }),
+    body: JSON.stringify(body),
   });
 }

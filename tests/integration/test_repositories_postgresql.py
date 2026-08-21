@@ -15,6 +15,7 @@ from app.db.unit_of_work import UnitOfWork
 from app.models import (
     AIExtractionRecord,
     Department,
+    OperationLog,
     Task,
     TaskInput,
     TaskNode,
@@ -38,21 +39,35 @@ pytestmark = pytest.mark.postgresql
 EXPECTED_DATABASE = "smarttaskboard_core_test"
 EXPECTED_HOST = "127.0.0.1"
 EXPECTED_PORT = 46479
-EXPECTED_REVISION = "c31f8e7a4d02"
+EXPECTED_REVISION = "f7b8c9d0e1f2"
 EXPECTED_TABLES = {
     "ai_extraction_records",
+    "auth_refresh_tokens",
     "departments",
+    "employee_profiles",
+    "notifications",
+    "operation_logs",
+    "performance_metrics",
+    "reminder_rules",
+    "system_parameters",
+    "task_archives",
+    "task_conflicts",
     "task_inputs",
     "task_node_dependencies",
     "task_node_participants",
     "task_nodes",
     "task_participants",
     "task_completion_reviews",
+    "task_change_requests",
     "task_progress_reports",
     "task_issues",
     "task_status_logs",
     "tasks",
+    "task_performance_matches",
+    "task_priority_scores",
+    "user_authorized_scopes",
     "users",
+    "workload_snapshots",
 }
 
 
@@ -142,6 +157,7 @@ def created_records(
     yield records
     with postgresql_engine.begin() as connection:
         cleanup_steps = (
+            (OperationLog, OperationLog.operator_employee_no, records.employee_nos),
             (TaskStatusLog, TaskStatusLog.status_log_id, records.status_log_ids),
             (
                 TaskNodeDependency,

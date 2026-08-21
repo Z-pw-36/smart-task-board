@@ -36,6 +36,20 @@ def test_database_url_is_read_from_environment(monkeypatch: pytest.MonkeyPatch) 
     settings = get_settings()
 
     assert settings.database_url == database_url
+    assert settings.database_connect_timeout_seconds == 5
+
+
+def test_database_connect_timeout_is_bounded(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(
+        "DATABASE_URL",
+        "postgresql+psycopg://unit:unit@127.0.0.1:5432/unit_test",
+    )
+    monkeypatch.setenv("DATABASE_CONNECT_TIMEOUT_SECONDS", "2")
+    get_settings.cache_clear()
+
+    settings = get_settings()
+
+    assert settings.database_connect_timeout_seconds == 2
 
 
 def test_database_url_is_required(monkeypatch: pytest.MonkeyPatch) -> None:

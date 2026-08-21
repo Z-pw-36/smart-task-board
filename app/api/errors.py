@@ -53,6 +53,34 @@ _WORKFLOW_ERRORS: dict[type[WorkflowError], tuple[int, str]] = {
 }
 
 
+def _integrity_sqlstate(exc: IntegrityError) -> str | None:
+    checked: set[int] = set()
+    stack: list[object | None] = [exc, getattr(exc, "orig", None)]
+    while stack:
+        item = stack.pop()
+        if item is None or id(item) in checked:
+            continue
+        checked.add(id(item))
+        sqlstate = getattr(item, "sqlstate", None) or getattr(item, "pgcode", None)
+        if isinstance(sqlstate, str):
+            return sqlstate
+        diag = getattr(item, "diag", None)
+        diag_sqlstate = getattr(diag, "sqlstate", None) if diag is not None else None
+        if isinstance(diag_sqlstate, str):
+            return diag_sqlstate
+        stack.extend(
+            (
+                getattr(item, "__cause__", None),
+                getattr(item, "__context__", None),
+            )
+        )
+    for text in (str(exc), str(getattr(exc, "orig", ""))):
+        lowered = text.casefold()
+        if "23505" in lowered or "unique constraint" in lowered:
+            return "23505"
+    return None
+
+
 async def authentication_error_handler(
     _request: Request,
     _exc: AuthenticationRequiredError,
@@ -95,8 +123,7 @@ async def integrity_error_handler(
     _request: Request,
     exc: IntegrityError,
 ) -> JSONResponse:
-    sqlstate = getattr(exc.orig, "sqlstate", None)
-    if sqlstate == "23505":
+    if _integrity_sqlstate(exc) == "23505":
         return _response(409, "resource_conflict", "Resource already exists")
     return _response(500, "internal_server_error", "Internal server error")
 

@@ -54,6 +54,33 @@ def _review_result(
     )
 
 
+def _change_request_result(
+    task_id: UUID,
+    *,
+    request_id: UUID | None = None,
+    request_status: str = "pending",
+) -> SimpleNamespace:
+    return SimpleNamespace(
+        change_request_id=request_id or uuid4(),
+        task_id=task_id,
+        requester_employee_no="E-ASSIGNEE",
+        patch_json={"task_name": "Updated task"},
+        reason="Task facts changed",
+        before_snapshot={"task_name": "Task"},
+        after_snapshot={"task_name": "Updated task"},
+        status=request_status,
+        decision_by_employee_no="E-CREATOR" if request_status in {"approved", "rejected"} else None,
+        decision_at=NOW if request_status in {"approved", "rejected"} else None,
+        decision_comment="Looks right" if request_status == "approved" else None,
+        cancelled_by_employee_no="E-ASSIGNEE" if request_status == "cancelled" else None,
+        cancelled_at=NOW if request_status == "cancelled" else None,
+        cancellation_reason="No longer needed" if request_status == "cancelled" else None,
+        requester_task_version=4,
+        base_task_version=4,
+        created_at=NOW,
+    )
+
+
 def _node(task_id: UUID, node_id: UUID) -> dict[str, object]:
     return {
         "node_id": node_id,
@@ -323,6 +350,183 @@ def test_approve_completion_requires_and_forwards_review_id(route_context) -> No
     assert response.json()["review"]["review_result"] == "approved"
 
 
+def test_change_request_routes_forward_actor_version_and_required_reason(
+    route_context,
+) -> None:
+    client, tasks, _, query = route_context
+    task_id, request_id = uuid4(), uuid4()
+    pending = _change_request_result(task_id, request_id=request_id)
+    approved = _change_request_result(task_id, request_id=request_id, request_status="approved")
+    rejected = _change_request_result(task_id, request_id=request_id, request_status="rejected")
+    cancelled = _change_request_result(task_id, request_id=request_id, request_status="cancelled")
+    tasks.submit_change_request.return_value = (_task_result(task_id, "in_progress", 4), pending)
+    tasks.approve_change_request.return_value = (_task_result(task_id, "in_progress", 5), approved)
+    tasks.reject_change_request.return_value = (_task_result(task_id, "in_progress", 4), rejected)
+    tasks.cancel_change_request.return_value = (_task_result(task_id, "in_progress", 4), cancelled)
+    query.list_change_requests.return_value = {
+        "items": [vars(pending)],
+        "limit": 20,
+        "offset": 0,
+        "total": 1,
+    }
+    query.get_change_request.return_value = vars(pending)
+
+    headers = {"X-Employee-No": "E-ACTOR"}
+    submit = client.post(
+        f"/api/v1/tasks/{task_id}/change-requests",
+        headers=headers,
+        json={
+            "expected_task_version": 4,
+            "patch_json": {"task_name": "Updated task"},
+            "reason": "  Task facts changed  ",
+        },
+    )
+    listed = client.get(f"/api/v1/tasks/{task_id}/change-requests", headers=headers)
+    detail = client.get(
+        f"/api/v1/tasks/{task_id}/change-requests/{request_id}",
+        headers=headers,
+    )
+    approve = client.post(
+        f"/api/v1/tasks/{task_id}/change-requests/{request_id}/actions/approve",
+        headers=headers,
+        json={"expected_task_version": 4, "approval_comment": "  Looks right  "},
+    )
+    reject = client.post(
+        f"/api/v1/tasks/{task_id}/change-requests/{request_id}/actions/reject",
+        headers=headers,
+        json={"expected_task_version": 4, "reason": "  Not aligned  "},
+    )
+    reject_without_reason = client.post(
+        f"/api/v1/tasks/{task_id}/change-requests/{request_id}/actions/reject",
+        headers=headers,
+        json={"expected_task_version": 4, "approval_comment": "wrong field"},
+    )
+    cancel = client.post(
+        f"/api/v1/tasks/{task_id}/change-requests/{request_id}/actions/cancel",
+        headers=headers,
+        json={"expected_task_version": 4, "reason": "  No longer needed  "},
+    )
+
+    assert [
+        submit.status_code,
+        listed.status_code,
+        detail.status_code,
+        approve.status_code,
+        reject.status_code,
+        reject_without_reason.status_code,
+        cancel.status_code,
+    ] == [201, 200, 200, 200, 200, 422, 200]
+    tasks.submit_change_request.assert_called_once_with(
+        task_id,
+        "E-ACTOR",
+        4,
+        "rest_api",
+        {"task_name": "Updated task"},
+        "Task facts changed",
+    )
+    tasks.approve_change_request.assert_called_once_with(
+        task_id,
+        "E-ACTOR",
+        4,
+        "rest_api",
+        request_id,
+        "  Looks right  ",
+    )
+    tasks.reject_change_request.assert_called_once_with(
+        task_id,
+        "E-ACTOR",
+        4,
+        "rest_api",
+        request_id,
+        "Not aligned",
+    )
+    tasks.cancel_change_request.assert_called_once_with(
+        task_id,
+        "E-ACTOR",
+        4,
+        "rest_api",
+        request_id,
+        "No longer needed",
+    )
+    query.list_change_requests.assert_called_once_with(task_id, "E-ACTOR", limit=20, offset=0)
+    query.get_change_request.assert_called_once_with(task_id, request_id, "E-ACTOR")
+
+
+def test_extended_lifecycle_routes_forward_reasons_and_targets(route_context) -> None:
+    client, tasks, _, _ = route_context
+    task_id, target_task_id = uuid4(), uuid4()
+    tasks.cancel_task.return_value = _task_result(task_id, "cancelled", 5)
+    tasks.withdraw_task.return_value = _task_result(task_id, "withdrawn", 5)
+    tasks.close_task.return_value = _task_result(task_id, "closed", 5)
+    tasks.archive_task.return_value = _task_result(task_id, "archived", 5)
+    tasks.restore_task.return_value = _task_result(task_id, "pending_confirmation", 6)
+    tasks.merge_task.return_value = _task_result(task_id, "merged", 5)
+    headers = {"X-Employee-No": "E-ACTOR"}
+
+    cancel = client.post(
+        f"/api/v1/tasks/{task_id}/actions/cancel",
+        headers=headers,
+        json={"expected_task_version": 4, "reason": "  Duplicate  "},
+    )
+    withdraw = client.post(
+        f"/api/v1/tasks/{task_id}/actions/withdraw",
+        headers=headers,
+        json={"expected_task_version": 4, "reason": "  Cannot take it  "},
+    )
+    close = client.post(
+        f"/api/v1/tasks/{task_id}/actions/close",
+        headers=headers,
+        json={"expected_task_version": 4, "reason": "  Obsolete  "},
+    )
+    archive = client.post(
+        f"/api/v1/tasks/{task_id}/actions/archive",
+        headers=headers,
+        json={"expected_task_version": 4},
+    )
+    restore = client.post(
+        f"/api/v1/tasks/{task_id}/actions/restore",
+        headers=headers,
+        json={"expected_task_version": 5, "reason": "  Resume  "},
+    )
+    merge = client.post(
+        f"/api/v1/tasks/{task_id}/actions/merge",
+        headers=headers,
+        json={
+            "expected_task_version": 4,
+            "target_task_id": str(target_task_id),
+            "reason": "  Consolidate  ",
+        },
+    )
+
+    assert [
+        cancel.status_code,
+        withdraw.status_code,
+        close.status_code,
+        archive.status_code,
+        restore.status_code,
+        merge.status_code,
+    ] == [200, 200, 200, 200, 200, 200]
+    tasks.cancel_task.assert_called_once_with(task_id, "E-ACTOR", 4, "rest_api", "Duplicate")
+    tasks.withdraw_task.assert_called_once_with(
+        task_id,
+        "E-ACTOR",
+        4,
+        "rest_api",
+        "Cannot take it",
+    )
+    tasks.close_task.assert_called_once_with(task_id, "E-ACTOR", 4, "rest_api", "Obsolete")
+    tasks.archive_task.assert_called_once_with(task_id, "E-ACTOR", 4, "rest_api")
+    tasks.restore_task.assert_called_once_with(task_id, "E-ACTOR", 5, "rest_api", "Resume")
+    tasks.merge_task.assert_called_once_with(
+        task_id,
+        "E-ACTOR",
+        4,
+        "rest_api",
+        target_task_id,
+        "Consolidate",
+    )
+
+
 def test_completion_requests_reject_blank_required_content(route_context) -> None:
     client, tasks, _, _ = route_context
     task_id = uuid4()
@@ -547,6 +751,10 @@ def test_openapi_and_swagger_expose_only_approved_contract(route_context) -> Non
     batch1_operations = {
         ("GET", "/api/v1/auth/prototype-users"),
         ("POST", "/api/v1/auth/prototype-login"),
+        ("POST", "/api/v1/auth/token"),
+        ("POST", "/api/v1/auth/refresh"),
+        ("POST", "/api/v1/auth/revoke"),
+        ("POST", "/api/v1/auth/logout"),
         ("GET", "/api/v1/me"),
         ("GET", "/api/v1/tasks"),
         ("GET", "/api/v1/tasks/inbox"),
@@ -572,12 +780,73 @@ def test_openapi_and_swagger_expose_only_approved_contract(route_context) -> Non
         ("POST", "/api/v1/tasks/{task_id}/issues/{issue_id}/actions/reject"),
         ("POST", "/api/v1/tasks/{task_id}/issues/{issue_id}/actions/close"),
     }
+    wave2_operations = {
+        ("POST", "/api/v1/tasks/{task_id}/change-requests"),
+        ("GET", "/api/v1/tasks/{task_id}/change-requests"),
+        (
+            "GET",
+            "/api/v1/tasks/{task_id}/change-requests/{change_request_id}",
+        ),
+        (
+            "POST",
+            "/api/v1/tasks/{task_id}/change-requests/{change_request_id}/actions/approve",
+        ),
+        (
+            "POST",
+            "/api/v1/tasks/{task_id}/change-requests/{change_request_id}/actions/reject",
+        ),
+        (
+            "POST",
+            "/api/v1/tasks/{task_id}/change-requests/{change_request_id}/actions/cancel",
+        ),
+        ("POST", "/api/v1/tasks/{task_id}/actions/cancel"),
+        ("POST", "/api/v1/tasks/{task_id}/actions/withdraw"),
+        ("POST", "/api/v1/tasks/{task_id}/actions/close"),
+        ("POST", "/api/v1/tasks/{task_id}/actions/archive"),
+        ("POST", "/api/v1/tasks/{task_id}/actions/restore"),
+        ("POST", "/api/v1/tasks/{task_id}/actions/merge"),
+    }
+    business_operations = {
+        ("GET", "/api/v1/system-parameters"),
+        ("PUT", "/api/v1/system-parameters/{param_key}"),
+        ("PUT", "/api/v1/organization/employee-profiles/{employee_no}"),
+        ("POST", "/api/v1/organization/recommendations/assignees"),
+        ("POST", "/api/v1/permissions/scopes"),
+        ("GET", "/api/v1/permissions/scopes"),
+        ("POST", "/api/v1/task-inputs"),
+        ("POST", "/api/v1/task-inputs/{input_id}/clarifications"),
+        ("POST", "/api/v1/task-inputs/{input_id}/confirm-task"),
+        ("POST", "/api/v1/performance-metrics"),
+        ("GET", "/api/v1/performance-metrics"),
+        ("POST", "/api/v1/tasks/{task_id}/performance-matches/suggest"),
+        (
+            "POST",
+            "/api/v1/tasks/{task_id}/performance-matches/{performance_match_id}/confirm",
+        ),
+        ("POST", "/api/v1/analytics/workload/{employee_no}"),
+        ("POST", "/api/v1/analytics/priorities"),
+        ("POST", "/api/v1/analytics/conflicts/detect"),
+        ("POST", "/api/v1/conflicts/{conflict_id}/actions/acknowledge"),
+        ("POST", "/api/v1/conflicts/{conflict_id}/actions/resolve"),
+        ("POST", "/api/v1/conflicts/{conflict_id}/actions/ignore"),
+        ("POST", "/api/v1/reminders/scan"),
+        ("POST", "/api/v1/notifications/send-pending"),
+        ("GET", "/api/v1/notifications"),
+        ("POST", "/api/v1/notifications/{notification_id}/read"),
+        ("POST", "/api/v1/tasks/{task_id}/archive-snapshot"),
+        ("GET", "/api/v1/archives/search"),
+        ("GET", "/api/v1/tasks/{task_id}/similar-archives"),
+        ("POST", "/api/v1/archives/{archive_id}/reuse"),
+        ("GET", "/api/v1/operation-logs"),
+    }
     assert len(phase5_operations) == 20
     assert phase5_operations <= api_operations
     assert batch1_operations <= api_operations
     assert batch2_operations <= api_operations
-    assert len({path for path in specification["paths"] if path.startswith("/api/v1")}) == 35
-    assert len(api_operations) == 38
+    assert wave2_operations <= api_operations
+    assert business_operations <= api_operations
+    assert len({path for path in specification["paths"] if path.startswith("/api/v1")}) == 76
+    assert len(api_operations) == 82
 
     security_schemes = specification["components"]["securitySchemes"]
     bearer_schemes = {
@@ -590,6 +859,9 @@ def test_openapi_and_swagger_expose_only_approved_contract(route_context) -> Non
     public_operations = {
         ("GET", "/api/v1/auth/prototype-users"),
         ("POST", "/api/v1/auth/prototype-login"),
+        ("POST", "/api/v1/auth/token"),
+        ("POST", "/api/v1/auth/refresh"),
+        ("POST", "/api/v1/auth/revoke"),
     }
     for method, path in api_operations:
         operation = specification["paths"][path][method.lower()]

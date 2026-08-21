@@ -16,6 +16,12 @@ config.set_main_option("sqlalchemy.url", settings.database_url.replace("%", "%%"
 target_metadata = Base.metadata
 
 
+def _connect_args() -> dict[str, int]:
+    if settings.database_url.startswith("postgresql"):
+        return {"connect_timeout": settings.database_connect_timeout_seconds}
+    return {}
+
+
 def run_migrations_offline() -> None:
     context.configure(
         url=config.get_main_option("sqlalchemy.url"),
@@ -33,6 +39,7 @@ def run_migrations_online() -> None:
         config.get_section(config.config_ini_section, {}),
         prefix="sqlalchemy.",
         poolclass=pool.NullPool,
+        connect_args=_connect_args(),
     )
     with connectable.connect() as connection:
         context.configure(

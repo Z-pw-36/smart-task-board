@@ -17,6 +17,9 @@ class TaskNodeRepository:
         self.session.flush()
         return node
 
+    def delete_node(self, node: TaskNode) -> None:
+        self.session.delete(node)
+
     def get_node(self, node_id: UUID) -> TaskNode | None:
         statement = select(TaskNode).where(TaskNode.node_id == node_id)
         return self.session.execute(statement).scalar_one_or_none()
@@ -44,6 +47,9 @@ class TaskNodeRepository:
         self.session.add(dependency)
         self.session.flush()
         return dependency
+
+    def delete_dependency(self, dependency: TaskNodeDependency) -> None:
+        self.session.delete(dependency)
 
     def get_dependency(self, dependency_id: UUID) -> TaskNodeDependency | None:
         statement = select(TaskNodeDependency).where(
@@ -109,6 +115,9 @@ class TaskNodeRepository:
         self.session.add(participant)
         self.session.flush()
         return participant
+
+    def delete_participant(self, participant: TaskNodeParticipant) -> None:
+        self.session.delete(participant)
 
     def get_participant(
         self,

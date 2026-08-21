@@ -191,6 +191,7 @@ def test_create_task_draft_builds_complete_aggregate_and_log() -> None:
     assert task.task_name == "New task"
     assert task.task_no is None
     assert extraction.task_id == task.task_id
+    assert extraction.confirmed_at == NOW
     assert uow.tasks.add_participant.call_count == 2
     primary = uow.tasks.add_participant.call_args_list[0].args[0]
     assert (primary.employee_no, primary.participant_role, primary.is_primary) == (
@@ -1044,7 +1045,7 @@ def test_submit_completion_commit_failure_rolls_back_the_unit_of_work() -> None:
             "Artifact",
         )
 
-    assert session.add.call_count == 2
+    assert session.add.call_count == 3
     assert session.flush.call_count == 2
     session.commit.assert_called_once_with()
     session.rollback.assert_called_once_with()

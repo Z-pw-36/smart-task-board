@@ -10,6 +10,17 @@ from app.core.config import get_settings
 from app.core.security import InvalidPrototypeTokenError, decode_access_token
 from app.db.session import SessionLocal, get_db
 from app.db.unit_of_work import UnitOfWork
+from app.services.authentication import AuthenticationService
+from app.services.business_capabilities import (
+    ArchiveReuseService,
+    AuditQueryService,
+    PerformanceMetricService,
+    PermissionScopeService,
+    PlanningAnalyticsService,
+    ReminderNotificationService,
+    SystemParameterService,
+    TaskIntakeService,
+)
 from app.services.progress_issue_query import ProgressIssueQueryService
 from app.services.progress_report import ProgressReportService
 from app.services.task_issue import TaskIssueService
@@ -99,9 +110,65 @@ def get_identity_service(
     return IdentityService(session)
 
 
+def get_authentication_service(
+    session: Annotated[Session, Depends(get_db)],
+) -> AuthenticationService:
+    return AuthenticationService(session, get_settings())
+
+
 def get_task_board_query_service(
     session: Annotated[Session, Depends(get_db)],
 ):
     from app.services.task_board_query import TaskBoardQueryService
 
     return TaskBoardQueryService(session)
+
+
+def get_system_parameter_service(
+    session: Annotated[Session, Depends(get_db)],
+) -> SystemParameterService:
+    return SystemParameterService(session)
+
+
+def get_permission_scope_service(
+    session: Annotated[Session, Depends(get_db)],
+) -> PermissionScopeService:
+    return PermissionScopeService(session)
+
+
+def get_intake_service(
+    session: Annotated[Session, Depends(get_db)],
+    uow_factory: Annotated[UowFactory, Depends(get_uow_factory)],
+) -> TaskIntakeService:
+    return TaskIntakeService(session, uow_factory)
+
+
+def get_performance_metric_service(
+    session: Annotated[Session, Depends(get_db)],
+) -> PerformanceMetricService:
+    return PerformanceMetricService(session)
+
+
+def get_planning_analytics_service(
+    session: Annotated[Session, Depends(get_db)],
+) -> PlanningAnalyticsService:
+    return PlanningAnalyticsService(session)
+
+
+def get_notification_service(
+    session: Annotated[Session, Depends(get_db)],
+) -> ReminderNotificationService:
+    return ReminderNotificationService(session)
+
+
+def get_archive_reuse_service(
+    session: Annotated[Session, Depends(get_db)],
+    uow_factory: Annotated[UowFactory, Depends(get_uow_factory)],
+) -> ArchiveReuseService:
+    return ArchiveReuseService(session, uow_factory)
+
+
+def get_audit_query_service(
+    session: Annotated[Session, Depends(get_db)],
+) -> AuditQueryService:
+    return AuditQueryService(session)

@@ -59,6 +59,7 @@ const task: TaskDetail = {
   ],
   dependencies: [],
   node_participants: [],
+  change_requests: [],
 };
 
 const actions: AvailableActions = {

@@ -256,7 +256,8 @@ def test_task_relationships_are_explicit_bidirectional_and_safe() -> None:
     expected_relationships = {
         "ai_extraction_records",
         "creator",
-        "completion_reviews",
+            "completion_reviews",
+            "change_requests",
         "department",
         "issues",
         "main_assignee",

@@ -9,6 +9,7 @@ from app.repositories import (
     AIExtractionRecordRepository,
     DepartmentRepository,
     ProgressReportRepository,
+    TaskChangeRequestRepository,
     TaskCompletionReviewRepository,
     TaskInputRepository,
     TaskIssueRepository,
@@ -44,6 +45,7 @@ class UnitOfWork:
         self.task_completion_reviews = TaskCompletionReviewRepository(
             self.session
         )
+        self.task_change_requests = TaskChangeRequestRepository(self.session)
         self.task_nodes = TaskNodeRepository(self.session)
         self.progress_reports = ProgressReportRepository(self.session)
         self.task_issues = TaskIssueRepository(self.session)

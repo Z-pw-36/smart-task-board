@@ -81,10 +81,14 @@ def test_user_relationships_are_bidirectional_unambiguous_and_safe() -> None:
 
     assert set(relationships.keys()) == {
         "department",
-        "assigned_completion_reviews",
-        "closed_task_issues",
-        "direct_reports",
-        "manager",
+            "assigned_completion_reviews",
+            "submitted_change_requests",
+            "decided_change_requests",
+            "cancelled_change_requests",
+            "closed_task_issues",
+            "direct_reports",
+            "employee_profile",
+            "manager",
         "owned_task_issues",
         "owned_task_nodes",
         "operated_task_status_logs",

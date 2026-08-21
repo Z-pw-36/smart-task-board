@@ -13,6 +13,8 @@ const completionNavigationActions = new Set<AllowedAction>([
   "approve_completion",
   "reject_completion",
   "reopen_node",
+  "submit_change_request",
+  "merge_task",
 ]);
 
 export function InboxPage() {
@@ -27,9 +29,17 @@ export function InboxPage() {
     mutationFn: async ({ item, allowedAction }: { item: InboxItem; allowedAction: AllowedAction }) => {
       let reason: string | undefined;
       let progress: number | undefined;
-      if (allowedAction === "return") {
-        reason = window.prompt("请填写退回原因")?.trim();
-        if (!reason) throw new Error("退回必须填写原因。");
+      if (["return", "cancel_task", "withdraw_task", "close_task", "restore_task"].includes(allowedAction)) {
+        reason = window.prompt(allowedAction === "return" ? "请填写退回原因" : "请填写操作原因")?.trim();
+        if (!reason) throw new Error("此操作必须填写原因。");
+      }
+      if (allowedAction === "reject_change_request") {
+        reason = window.prompt("请填写驳回意见")?.trim();
+        if (!reason) throw new Error("驳回变更申请必须填写意见。");
+      }
+      if (allowedAction === "cancel_change_request") {
+        reason = window.prompt("请填写取消原因")?.trim();
+        if (!reason) throw new Error("取消变更申请必须填写原因。");
       }
       if (["resolve_issue", "reject_issue", "close_issue"].includes(allowedAction)) {
         reason = window.prompt("请填写处理说明")?.trim();
@@ -57,7 +67,7 @@ export function InboxPage() {
   return (
     <div className="page-stack">
       <header className="page-header"><div><p className="eyebrow">行动队列</p><h1>待处理</h1><p>最终权限仍由服务端状态机校验。</p></div></header>
-      <label className="single-filter">待办类型<select value={actionCode} onChange={(event) => setActionCode(event.target.value)}><option value="">全部</option><option value="confirm_task">任务确认</option><option value="accept_task">接受任务</option><option value="handle_returned_task">退回处理</option><option value="start_node">开始节点</option><option value="update_node">更新节点</option><option value="complete_node">完成节点</option><option value="submit_completion">提交验收</option><option value="approve_completion">待我验收</option><option value="reopen_node">重开返工节点</option><option value="report_due">进度待汇报</option><option value="handle_issue">卡点待处理</option></select></label>
+      <label className="single-filter">待办类型<select value={actionCode} onChange={(event) => setActionCode(event.target.value)}><option value="">全部</option><option value="confirm_task">任务确认</option><option value="accept_task">接受任务</option><option value="handle_returned_task">退回处理</option><option value="start_node">开始节点</option><option value="update_node">更新节点</option><option value="complete_node">完成节点</option><option value="submit_completion">提交验收</option><option value="approve_completion">待我验收</option><option value="reopen_node">重开返工节点</option><option value="report_due">进度待汇报</option><option value="handle_issue">卡点待处理</option><option value="submit_change_request">提交变更申请</option><option value="approve_change_request">待审批变更</option><option value="reject_change_request">待驳回变更</option><option value="cancel_change_request">待取消变更</option><option value="cancel_task">取消任务</option><option value="withdraw_task">撤回任务</option><option value="merge_task">合并任务</option><option value="close_task">关闭任务</option><option value="archive_task">归档任务</option><option value="restore_task">恢复任务</option></select></label>
       {notice && <div className="notice" role="status">{notice}</div>}
       {inbox.isLoading && <LoadingState />}
       {inbox.isError && <ErrorState error={inbox.error} retry={() => void inbox.refetch()} />}
@@ -96,6 +106,8 @@ export function InboxPage() {
 }
 
 function completionNavigationLabel(actions: AllowedAction[]): string {
+  if (actions.includes("submit_change_request")) return "填写变更申请";
+  if (actions.includes("merge_task")) return "打开任务详情";
   if (actions.includes("approve_completion") || actions.includes("reject_completion")) {
     return "查看并验收";
   }

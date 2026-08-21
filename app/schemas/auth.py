@@ -30,3 +30,14 @@ class PrototypeLoginResponse(StrictSchema):
     token_type: str = "bearer"
     expires_in: int
     user: PrototypeLoginUserResponse
+
+
+class RefreshTokenRequest(StrictSchema):
+    refresh_token: EmployeeNo
+
+
+class TokenResponse(StrictSchema):
+    access_token: str = Field(repr=False)
+    token_type: str = "bearer"
+    expires_in: int
+    refresh_token: str = Field(repr=False)
