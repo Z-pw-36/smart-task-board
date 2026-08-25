@@ -1,11 +1,12 @@
 import { apiRequest } from "./client";
-import type { AllowedAction } from "./types";
+import type { AllowedAction, TaskActionResult } from "./types";
 
 export type TaskLifecycleAction = Exclude<
   AllowedAction,
   | "start_node"
   | "update_node_progress"
   | "complete_node"
+  | "plan_task"
   | "submit_completion"
   | "approve_completion"
   | "reject_completion"
@@ -54,6 +55,7 @@ export const actionLabels: Record<AllowedAction, string> = {
   accept: "接受任务",
   return: "退回任务",
   resend: "重新发送",
+  plan_task: "任务规划",
   start_node: "开始节点",
   update_node_progress: "更新进度",
   complete_node: "完成节点",
@@ -87,8 +89,8 @@ export async function runTaskAction(
   action: TaskLifecycleAction,
   version: number,
   reason?: string,
-): Promise<void> {
-  await apiRequest(`/api/v1/tasks/${taskId}/actions/${actionPaths[action]}`, {
+): Promise<TaskActionResult> {
+  return apiRequest<TaskActionResult>(`/api/v1/tasks/${taskId}/actions/${actionPaths[action]}`, {
     method: "POST",
     body: JSON.stringify({
       expected_task_version: version,

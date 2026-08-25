@@ -5,6 +5,7 @@ from fastapi import Depends, Request, Security
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
+from app.ai.providers import OpenAICompatibleTaskAgentProvider
 from app.api.errors import AuthenticationRequiredError
 from app.core.config import get_settings
 from app.core.security import InvalidPrototypeTokenError, decode_access_token
@@ -140,7 +141,17 @@ def get_intake_service(
     session: Annotated[Session, Depends(get_db)],
     uow_factory: Annotated[UowFactory, Depends(get_uow_factory)],
 ) -> TaskIntakeService:
-    return TaskIntakeService(session, uow_factory)
+    settings = get_settings()
+    if settings.ai_provider == "openai_compatible":
+        provider = OpenAICompatibleTaskAgentProvider.from_settings(settings)
+        return TaskIntakeService(
+            session,
+            uow_factory,
+            extraction_provider=provider,
+            decomposition_provider=provider,
+            agent_timezone=settings.app_timezone,
+        )
+    return TaskIntakeService(session, uow_factory, agent_timezone=settings.app_timezone)
 
 
 def get_performance_metric_service(

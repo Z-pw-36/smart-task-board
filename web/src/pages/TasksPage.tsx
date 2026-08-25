@@ -1,8 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 
-import { apiRequest } from "../api/client";
-import type { PaginatedTasks } from "../api/types";
+import { listTasks } from "../api/endpoints";
 import { EmptyState, ErrorState, LoadingState } from "../components/Feedback";
 import { TaskCard } from "../components/TaskCard";
 
@@ -13,9 +12,8 @@ export function TasksPage() {
   const query = useQuery({
     queryKey: ["tasks", filters, offset],
     queryFn: () => {
-      const params = new URLSearchParams({ relation: filters.relation, limit: String(limit), offset: String(offset) });
-      Object.entries(filters).forEach(([key, value]) => { if (key !== "relation" && value) params.set(key, value); });
-      return apiRequest<PaginatedTasks>(`/api/v1/tasks?${params}`);
+      const params = { ...filters, limit, offset };
+      return listTasks(params);
     },
   });
   function update(name: string, value: string) {

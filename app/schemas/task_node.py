@@ -50,6 +50,10 @@ class TaskNodeDraftRequest(StrictSchema):
         return self
 
 
+class TaskPlanningNodeDraftRequest(TaskNodeDraftRequest):
+    enabled: bool = True
+
+
 class TaskNodeDependencyDraftRequest(StrictSchema):
     predecessor_node_id: UUID
     successor_node_id: UUID
@@ -67,6 +71,46 @@ class UpdateNodeProgressRequest(StrictSchema):
     expected_task_version: int = Field(ge=1)
     progress_percent: int = Field(ge=0, le=100)
     actual_hours: NonNegativeDecimalString | None = None
+
+
+class TaskPlanningSuggestionRequest(StrictSchema):
+    instructions: str | None = None
+
+
+class TaskPlanningSuggestionNodeResponse(StrictSchema):
+    client_node_id: str
+    node_order: int
+    node_name: str
+    action_detail: str | None = None
+    tools_or_materials: str | None = None
+    suggested_owner_employee_no: str | None = None
+    planned_start_time: datetime | None = None
+    planned_deadline: datetime | None = None
+    estimated_hours: DecimalString | None = None
+    deliverable: str | None = None
+    acceptance_criteria: str | None = None
+    dependencies: list[str] = Field(default_factory=list)
+    enabled: bool = True
+
+
+class TaskPlanningSuggestionDependencyResponse(StrictSchema):
+    predecessor_client_node_id: str
+    successor_client_node_id: str
+    dependency_type: str
+    reason: str | None = None
+
+
+class TaskPlanningSuggestionResponse(StrictSchema):
+    task_id: UUID
+    suggested_nodes: list[TaskPlanningSuggestionNodeResponse]
+    suggested_dependencies: list[TaskPlanningSuggestionDependencyResponse]
+
+
+class ConfirmTaskPlanningRequest(StrictSchema):
+    expected_task_version: int = Field(ge=1)
+    nodes: tuple[TaskPlanningNodeDraftRequest, ...]
+    dependencies: tuple[TaskNodeDependencyDraftRequest, ...] = ()
+    node_participants: tuple[TaskNodeParticipantDraftRequest, ...] = ()
 
 
 class TaskNodeResponse(StrictSchema):

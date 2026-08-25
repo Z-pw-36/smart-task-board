@@ -7,6 +7,8 @@ const navigation = [
   { to: "/inbox", label: "待处理", icon: "✓" },
   { to: "/tasks", label: "我的任务", icon: "▤" },
   { to: "/tasks/new", label: "创建", icon: "+" },
+  { to: "/notifications", label: "通知", icon: "!" },
+  { to: "/archives", label: "归档", icon: "#" },
 ];
 
 export function AppShell() {

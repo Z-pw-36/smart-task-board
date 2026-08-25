@@ -18,6 +18,7 @@ from app.models import (
     TaskArchive,
     TaskConflict,
     TaskInput,
+    TaskParticipant,
     TaskPerformanceMatch,
     User,
     UserAuthorizedScope,
@@ -27,7 +28,6 @@ from app.services import business_capabilities as business_module
 from app.services.business_capabilities import (
     ArchiveReuseService,
     FakeASRProvider,
-    FakeTaskDecompositionProvider,
     FakeTaskExtractionProvider,
     PerformanceMetricService,
     PermissionScopeService,
@@ -36,6 +36,7 @@ from app.services.business_capabilities import (
     SystemParameterService,
     TaskIntakeService,
 )
+from app.services.errors import PermissionDeniedError
 
 NOW = datetime(2026, 8, 21, 9, 0, tzinfo=UTC)
 
@@ -237,12 +238,16 @@ def test_task_intake_voice_clarify_and_confirm_create_draft(
     actor = _user("CREATOR")
     input_id = uuid4()
     session = RecordingSession(objects={(User, "CREATOR"): actor, (TaskInput, input_id): None})
+    class FailingDecompositionProvider:
+        def decompose(self, _extracted):
+            raise AssertionError("task creation must not trigger decomposition")
+
     service = TaskIntakeService(
         session,
         object,
         asr_provider=FakeASRProvider(),
         extraction_provider=FakeTaskExtractionProvider(),
-        decomposition_provider=FakeTaskDecompositionProvider(),
+        decomposition_provider=FailingDecompositionProvider(),
         clock=lambda: NOW,
     )
 
@@ -312,9 +317,101 @@ def test_task_intake_voice_clarify_and_confirm_create_draft(
     assert command.operation_source == "ai_intake"
     assert command.task_name == "Confirmed task"
     assert command.department_id == department_id
-    assert len(command.nodes) == 5
-    assert len(command.dependencies) == 4
+    assert command.nodes == ()
+    assert command.dependencies == ()
+    assert command.node_participants == ()
     assert command.extraction_record_ids == (clarified.extraction.extraction_id,)
+
+
+def test_main_assignee_suggests_task_plan_after_acceptance_and_sanitizes_owner() -> None:
+    task_id = uuid4()
+    task = _task(task_id=task_id, status="in_progress", deadline=NOW + timedelta(days=5))
+    extraction = AIExtractionRecord(
+        extraction_id=uuid4(),
+        input_id=uuid4(),
+        task_id=task_id,
+        extracted_json={"nodes": [{"clientNodeId": "from-extraction", "nodeName": "Old node"}]},
+        missing_fields=[],
+        low_confidence_fields=[],
+        confirm_questions=[],
+        confirmed_at=NOW,
+    )
+    participant = TaskParticipant(
+        task_id=task_id,
+        employee_no="COLLAB",
+        participant_role="collaborator",
+        is_primary=False,
+    )
+
+    class PlanningProvider:
+        def decompose(self, extracted):
+            assert extracted["task_id"] == str(task_id)
+            assert extracted["planning_instructions"] == "make it execution ready"
+            return {
+                "nodes": [
+                    {
+                        "clientNodeId": "draft-node-1",
+                        "nodeName": "Prepare scope",
+                        "actionDetail": "Confirm input scope.",
+                        "ownerEmployeeNo": "OUTSIDER",
+                        "plannedDeadline": (NOW + timedelta(days=1)).isoformat(),
+                        "deliverable": "Scope note",
+                        "acceptanceCriteria": "Scope is approved",
+                    },
+                    {
+                        "clientNodeId": "draft-node-2",
+                        "nodeName": "Deliver result",
+                        "ownerEmployeeNo": "COLLAB",
+                        "plannedDeadline": (NOW + timedelta(days=4)).isoformat(),
+                        "dependencies": ["draft-node-1"],
+                    },
+                ],
+                "dependencies": [
+                    {
+                        "predecessorClientNodeId": "draft-node-1",
+                        "successorClientNodeId": "draft-node-2",
+                        "dependencyType": "finish_to_start",
+                    }
+                ],
+            }
+
+    session = RecordingSession(
+        objects={
+            (Task, task_id): task,
+            (User, "ASSIGNEE"): _user("ASSIGNEE"),
+            (User, "OUTSIDER"): _user("OUTSIDER"),
+        },
+        scalar_results=[extraction],
+        scalars_results=[[participant], [participant]],
+    )
+    service = TaskIntakeService(
+        session,
+        object,
+        decomposition_provider=PlanningProvider(),
+        clock=lambda: NOW,
+    )
+
+    with pytest.raises(PermissionDeniedError):
+        service.suggest_task_plan("CREATOR", task_id)
+
+    response = service.suggest_task_plan(
+        "ASSIGNEE",
+        task_id,
+        instructions=" make it execution ready ",
+    )
+
+    assert response["task_id"] == task_id
+    assert len(response["suggested_nodes"]) == 2
+    assert response["suggested_nodes"][0]["suggested_owner_employee_no"] is None
+    assert response["suggested_nodes"][1]["suggested_owner_employee_no"] == "COLLAB"
+    assert response["suggested_dependencies"] == [
+        {
+            "predecessor_client_node_id": "draft-node-1",
+            "successor_client_node_id": "draft-node-2",
+            "dependency_type": "finish_to_start",
+            "reason": None,
+        }
+    ]
 
 
 def test_performance_metric_suggestion_and_confirmation_are_explainable(

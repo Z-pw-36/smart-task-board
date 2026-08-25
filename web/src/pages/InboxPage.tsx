@@ -2,13 +2,15 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link } from "react-router-dom";
 
-import { ApiError, apiRequest } from "../api/client";
+import { ApiError } from "../api/client";
+import { getInbox } from "../api/endpoints";
 import { actionLabels, runInboxAction } from "../api/taskActions";
-import type { AllowedAction, InboxItem, PaginatedInbox } from "../api/types";
+import type { AllowedAction, InboxItem } from "../api/types";
 import { EmptyState, ErrorState, LoadingState } from "../components/Feedback";
 import { formatDate } from "../components/task-card-utils";
 
 const completionNavigationActions = new Set<AllowedAction>([
+  "plan_task",
   "submit_completion",
   "approve_completion",
   "reject_completion",
@@ -23,7 +25,7 @@ export function InboxPage() {
   const [notice, setNotice] = useState("");
   const inbox = useQuery({
     queryKey: ["inbox", actionCode],
-    queryFn: () => apiRequest<PaginatedInbox>(`/api/v1/tasks/inbox${actionCode ? `?action_code=${actionCode}` : ""}`),
+    queryFn: () => getInbox({ action_code: actionCode }),
   });
   const action = useMutation({
     mutationFn: async ({ item, allowedAction }: { item: InboxItem; allowedAction: AllowedAction }) => {
@@ -106,6 +108,7 @@ export function InboxPage() {
 }
 
 function completionNavigationLabel(actions: AllowedAction[]): string {
+  if (actions.includes("plan_task")) return "打开任务规划";
   if (actions.includes("submit_change_request")) return "填写变更申请";
   if (actions.includes("merge_task")) return "打开任务详情";
   if (actions.includes("approve_completion") || actions.includes("reject_completion")) {

@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import { apiRequest, authExpiredEvent, session } from "../api/client";
-import type { CurrentUser, LoginResponse } from "../api/types";
+import { authExpiredEvent, session } from "../api/client";
+import { getCurrentUser, prototypeLogin } from "../api/endpoints";
+import type { CurrentUser } from "../api/types";
 import { AuthContext } from "./auth-context";
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
@@ -20,7 +21,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       return;
     }
     try {
-      setUser(await apiRequest<CurrentUser>("/api/v1/me"));
+      setUser(await getCurrentUser());
     } catch {
       logout();
     } finally {
@@ -39,14 +40,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [logout]);
 
   const login = useCallback(async (employeeNo: string) => {
-    const result = await apiRequest<LoginResponse>(
-      "/api/v1/auth/prototype-login",
-      { method: "POST", body: JSON.stringify({ employee_no: employeeNo }) },
-      { anonymous: true },
-    );
+    const result = await prototypeLogin(employeeNo);
     session.setToken(result.access_token);
     try {
-      setUser(await apiRequest<CurrentUser>("/api/v1/me"));
+      setUser(await getCurrentUser());
     } catch (error) {
       session.clear();
       throw error;

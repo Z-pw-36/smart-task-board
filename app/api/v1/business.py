@@ -28,6 +28,7 @@ from app.schemas.business import (
     EmployeeProfileResponse,
     EmployeeProfileUpsertRequest,
     NotificationResponse,
+    OperationLogPageResponse,
     PerformanceMatchResponse,
     PerformanceMetricCreateRequest,
     PerformanceMetricResponse,
@@ -542,7 +543,11 @@ def reuse_archive(
     )
 
 
-@router.get("/operation-logs", summary="List operation audit logs")
+@router.get(
+    "/operation-logs",
+    response_model=OperationLogPageResponse,
+    summary="List operation audit logs",
+)
 def list_operation_logs(
     actor: Actor,
     service: AuditService,

@@ -73,3 +73,37 @@ def test_database_url_is_not_exposed_in_repr_or_output(
     captured = capsys.readouterr()
     assert database_url not in captured.out
     assert database_url not in captured.err
+
+
+def test_ai_provider_defaults_to_fake() -> None:
+    settings = Settings(
+        database_url="sqlite+pysqlite:///:memory:",
+        _env_file=None,
+    )
+
+    assert settings.ai_provider == "fake"
+
+
+def test_openai_compatible_provider_requires_backend_environment() -> None:
+    with pytest.raises(ValidationError, match="AI_API_KEY"):
+        Settings(
+            database_url="sqlite+pysqlite:///:memory:",
+            ai_provider="openai_compatible",
+            _env_file=None,
+        )
+
+
+def test_openai_compatible_settings_do_not_expose_secret_values() -> None:
+    settings = Settings(
+        database_url="sqlite+pysqlite:///:memory:",
+        ai_provider="openai_compatible",
+        ai_api_key="unit-secret-key",
+        ai_base_url="https://unit.invalid/v1",
+        ai_model="unit-model",
+        _env_file=None,
+    )
+
+    rendered = repr(settings)
+    assert "unit-secret-key" not in rendered
+    assert "https://unit.invalid/v1" not in rendered
+    assert "unit-model" not in rendered

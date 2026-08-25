@@ -1,15 +1,19 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { type FormEvent, useState } from "react";
 
-import { ApiError, apiRequest } from "../api/client";
+import { ApiError } from "../api/client";
+import {
+  createTaskIssue,
+  listProgressReports,
+  listTaskIssues,
+  runIssueAction,
+  submitProgressReport,
+} from "../api/endpoints";
 import type {
   AvailableActions,
   IssueAction,
-  ProgressReport,
-  ProgressReportPage,
   TaskDetail,
   TaskIssue,
-  TaskIssuePage,
 } from "../api/types";
 import { useAuth } from "../auth/useAuth";
 import { EmptyState, ErrorState, LoadingState } from "./Feedback";
@@ -44,17 +48,11 @@ export function ProgressIssuesPanel({ task, actions }: Props) {
 
   const reportsQuery = useQuery({
     queryKey: ["progress-reports", task.task_id],
-    queryFn: () =>
-      apiRequest<ProgressReportPage>(
-        `/api/v1/tasks/${task.task_id}/progress-reports?limit=100&offset=0`,
-      ),
+    queryFn: () => listProgressReports(task.task_id, { limit: 100, offset: 0 }),
   });
   const issuesQuery = useQuery({
     queryKey: ["task-issues", task.task_id],
-    queryFn: () =>
-      apiRequest<TaskIssuePage>(
-        `/api/v1/tasks/${task.task_id}/issues?limit=100&offset=0`,
-      ),
+    queryFn: () => listTaskIssues(task.task_id, { limit: 100, offset: 0 }),
   });
   const reports = Array.isArray(reportsQuery.data?.items) ? reportsQuery.data.items : [];
   const issues = Array.isArray(issuesQuery.data?.items) ? issuesQuery.data.items : [];
@@ -88,15 +86,12 @@ export function ProgressIssuesPanel({ task, actions }: Props) {
 
   const submitReport = useMutation({
     mutationFn: () =>
-      apiRequest<ProgressReport>(`/api/v1/tasks/${task.task_id}/progress-reports`, {
-        method: "POST",
-        body: JSON.stringify({
-          expected_task_version: actions.task_version,
-          node_id: selectedReportNodeId || null,
-          progress_percent: progressPercent,
-          report_content: reportContent,
-          corrects_report_id: correctsReportId || null,
-        }),
+      submitProgressReport(task.task_id, {
+        expected_task_version: actions.task_version,
+        node_id: selectedReportNodeId || null,
+        progress_percent: progressPercent,
+        report_content: reportContent,
+        corrects_report_id: correctsReportId || null,
       }),
     onSuccess: async () => {
       setNotice(correctsReportId ? "更正汇报已追加。" : "进度汇报已提交。");
@@ -109,20 +104,17 @@ export function ProgressIssuesPanel({ task, actions }: Props) {
 
   const createIssue = useMutation({
     mutationFn: () =>
-      apiRequest<TaskIssue>(`/api/v1/tasks/${task.task_id}/issues`, {
-        method: "POST",
-        body: JSON.stringify({
-          expected_task_version: actions.task_version,
-          node_id: selectedIssueNodeId || null,
-          issue_type: issueType,
-          title: issueTitle,
-          description: issueDescription,
-          severity: issueSeverity,
-          owner_employee_no: issueOwner,
-          ...(issueType === "resource_request"
-            ? { requested_resource: issueDescription }
-            : {}),
-        }),
+      createTaskIssue(task.task_id, {
+        expected_task_version: actions.task_version,
+        node_id: selectedIssueNodeId || null,
+        issue_type: issueType,
+        title: issueTitle,
+        description: issueDescription,
+        severity: issueSeverity,
+        owner_employee_no: issueOwner,
+        ...(issueType === "resource_request"
+          ? { requested_resource: issueDescription }
+          : {}),
       }),
     onSuccess: async () => {
       setNotice("卡点已上报。");
@@ -142,16 +134,10 @@ export function ProgressIssuesPanel({ task, actions }: Props) {
       if (action !== "start_processing" && !reason) {
         throw new Error("处理说明不能为空。");
       }
-      return apiRequest<TaskIssue>(
-        `/api/v1/tasks/${task.task_id}/issues/${issue.issue_id}/actions/${action.replace("_", "-")}`,
-        {
-          method: "POST",
-          body: JSON.stringify({
-            expected_task_version: actions.task_version,
-            reason,
-          }),
-        },
-      );
+      return runIssueAction(task.task_id, issue.issue_id, action, {
+        expected_task_version: actions.task_version,
+        reason,
+      });
     },
     onSuccess: async () => {
       setNotice("卡点状态已更新。");

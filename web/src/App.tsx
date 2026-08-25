@@ -6,10 +6,12 @@ import { AuthProvider } from "./auth/AuthContext";
 import { useAuth } from "./auth/useAuth";
 import { AppShell } from "./components/AppShell";
 import { LoadingState } from "./components/Feedback";
+import { ArchivesPage } from "./pages/ArchivesPage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { InboxPage } from "./pages/InboxPage";
 import { LoginPage } from "./pages/LoginPage";
 import { NewTaskPage } from "./pages/NewTaskPage";
+import { NotificationsPage } from "./pages/NotificationsPage";
 import { TaskDetailPage } from "./pages/TaskDetailPage";
 import { TasksPage } from "./pages/TasksPage";
 
@@ -32,6 +34,8 @@ export function App() {
             <Route path="tasks/new" element={<NewTaskPage />} />
             <Route path="tasks/:taskId" element={<TaskDetailPage />} />
             <Route path="inbox" element={<InboxPage />} />
+            <Route path="notifications" element={<NotificationsPage />} />
+            <Route path="archives" element={<ArchivesPage />} />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

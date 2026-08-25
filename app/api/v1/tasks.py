@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, Query, status
 
 from app.api.dependencies import (
     get_current_employee_no,
+    get_intake_service,
     get_task_node_workflow_service,
     get_task_query_service,
     get_task_workflow_service,
@@ -14,6 +15,7 @@ from app.schemas import (
     CompletionDecisionRequest,
     CompletionReviewActionResponse,
     CompletionReviewResponse,
+    ConfirmTaskPlanningRequest,
     CreateTaskRequest,
     ErrorResponse,
     MergeTaskRequest,
@@ -36,6 +38,8 @@ from app.schemas import (
     TaskChangeRequestResponse,
     TaskDetailResponse,
     TaskNodeResponse,
+    TaskPlanningSuggestionRequest,
+    TaskPlanningSuggestionResponse,
     UpdateNodeProgressRequest,
 )
 from app.services.commands import (
@@ -65,6 +69,7 @@ Actor = Annotated[str, Depends(get_current_employee_no)]
 TaskService = Annotated[TaskWorkflowService, Depends(get_task_workflow_service)]
 NodeService = Annotated[TaskNodeWorkflowService, Depends(get_task_node_workflow_service)]
 QueryService = Annotated[TaskQueryService, Depends(get_task_query_service)]
+IntakeService = Annotated[Any, Depends(get_intake_service)]
 
 
 def _create_command(request: CreateTaskRequest, actor: str) -> CreateTaskDraftCommand:
@@ -156,6 +161,65 @@ def get_task_node(
     query_service: QueryService,
 ) -> dict[str, Any]:
     return query_service.get_node(task_id, node_id, actor)
+
+
+@router.post(
+    "/{task_id}/planning/decompose",
+    response_model=TaskPlanningSuggestionResponse,
+    summary="Generate AI task planning suggestions for the accepted main assignee",
+    responses=ERROR_RESPONSES,
+)
+def decompose_task_plan(
+    task_id: UUID,
+    request: TaskPlanningSuggestionRequest,
+    actor: Actor,
+    service: IntakeService,
+) -> dict[str, object]:
+    return service.suggest_task_plan(
+        actor,
+        task_id,
+        instructions=request.instructions,
+    )
+
+
+@router.post(
+    "/{task_id}/planning/confirm",
+    response_model=TaskActionResponse,
+    summary="Confirm an accepted task plan and persist executable nodes",
+    responses=ERROR_RESPONSES,
+)
+def confirm_task_plan(
+    task_id: UUID,
+    request: ConfirmTaskPlanningRequest,
+    actor: Actor,
+    service: TaskService,
+) -> TaskActionResponse:
+    enabled_nodes = [
+        TaskNodeDraft(**node.model_dump(exclude={"enabled"}))
+        for node in request.nodes
+        if node.enabled
+    ]
+    enabled_node_ids = {node.node_id for node in enabled_nodes}
+    return _task_response(
+        service.confirm_task_plan(
+            task_id,
+            actor,
+            request.expected_task_version,
+            OPERATION_SOURCE,
+            tuple(enabled_nodes),
+            tuple(
+                TaskNodeDependencyDraft(**dependency.model_dump())
+                for dependency in request.dependencies
+                if dependency.predecessor_node_id in enabled_node_ids
+                and dependency.successor_node_id in enabled_node_ids
+            ),
+            tuple(
+                TaskNodeParticipantDraft(**participant.model_dump())
+                for participant in request.node_participants
+                if participant.node_id in enabled_node_ids
+            ),
+        )
+    )
 
 
 @router.get(

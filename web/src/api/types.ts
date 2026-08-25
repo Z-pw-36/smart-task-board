@@ -19,6 +19,7 @@ export type AllowedAction =
   | "accept"
   | "return"
   | "resend"
+  | "plan_task"
   | "start_node"
   | "update_node_progress"
   | "complete_node"
@@ -56,6 +57,21 @@ export interface LoginResponse {
   token_type: "bearer";
   expires_in: number;
   user: { employee_no: string; name: string };
+}
+
+export interface AuthTokenPayload {
+  employee_no: string;
+}
+
+export interface RefreshTokenPayload {
+  refresh_token: string;
+}
+
+export interface AuthTokenResponse {
+  access_token: string;
+  token_type: "bearer";
+  expires_in: number;
+  refresh_token: string;
 }
 
 export interface CurrentUser {
@@ -123,12 +139,174 @@ export interface DashboardSummary {
   assigned_task_count: number;
   inbox_count: number;
   in_progress_count: number;
+  pending_acceptance_count: number;
+  today_task_count: number;
   due_within_7_days_count: number;
   overdue_count: number;
   report_due_count: number;
   open_issue_count: number;
+  blocked_task_count: number;
+  completion_review_count: number;
+  unread_notification_count: number;
+  open_conflict_count: number;
   due_window_days: number;
   recent_tasks: TaskSummary[];
+  latest_workload: Record<string, unknown> | null;
+  priority_items: Array<Record<string, unknown>>;
+}
+
+export interface DepartmentOption {
+  department_id: string;
+  department_name: string;
+}
+
+export interface TaskActionResult {
+  task_id: string;
+  status: TaskStatus;
+  task_version: number;
+  updated_at: string;
+}
+
+export interface TaskParticipantDraftInput {
+  employee_no: string;
+  participant_role: string;
+  is_primary?: boolean;
+}
+
+export interface TaskNodeDraftInput {
+  node_id: string;
+  node_order: number;
+  node_name: string;
+  action_detail?: string | null;
+  owner_employee_no?: string | null;
+  planned_start_time?: string | null;
+  planned_deadline?: string | null;
+  estimated_hours?: string | null;
+  actual_hours?: string | null;
+  deliverable?: string | null;
+  acceptance_criteria?: string | null;
+  tools_or_materials?: string | null;
+}
+
+export interface TaskPlanningNodeDraftInput extends TaskNodeDraftInput {
+  enabled?: boolean;
+}
+
+export interface TaskNodeDependencyDraftInput {
+  dependency_id?: string;
+  predecessor_node_id: string;
+  successor_node_id: string;
+  dependency_type?: string;
+}
+
+export interface TaskNodeParticipantDraftInput {
+  node_id: string;
+  employee_no: string;
+  participant_role: string;
+}
+
+export interface CreateTaskPayload {
+  task_id?: string | null;
+  task_name: string;
+  task_description?: string | null;
+  task_goal?: string | null;
+  task_source?: string | null;
+  main_assignee_employee_no?: string | null;
+  report_to_employee_no?: string | null;
+  report_to_level?: string | null;
+  reviewer_employee_no?: string | null;
+  department_id?: string | null;
+  start_time?: string | null;
+  deadline?: string | null;
+  estimated_hours?: string | null;
+  actual_hours?: string | null;
+  task_weight?: number | null;
+  deliverable?: string | null;
+  acceptance_criteria?: string | null;
+  is_urgent?: boolean | null;
+  report_cycle?: string | null;
+  participants?: TaskParticipantDraftInput[];
+  nodes?: TaskNodeDraftInput[];
+  dependencies?: TaskNodeDependencyDraftInput[];
+  node_participants?: TaskNodeParticipantDraftInput[];
+  extraction_record_ids?: string[];
+}
+
+export type TaskInputType = "text" | "voice" | "wecom_text";
+export type TaskInputSourceChannel = "web" | "api" | "wecom";
+
+export interface TaskInputPayload {
+  input_id?: string | null;
+  input_type?: TaskInputType;
+  raw_text?: string | null;
+  voice_file_url?: string | null;
+  source_channel?: TaskInputSourceChannel;
+}
+
+export interface TaskIntakeResponse {
+  input_id: string;
+  input_type: string;
+  raw_text: string | null;
+  asr_text: string | null;
+  source_channel: string;
+  submitted_by_employee_no: string;
+  submitted_at: string;
+  extraction_id: string;
+  extracted_json: Record<string, unknown>;
+  missing_fields: string[];
+  low_confidence_fields: string[];
+  confirm_questions: string[];
+  confidence_score: string | null;
+}
+
+export interface TaskClarificationPayload {
+  answers: Record<string, unknown>;
+}
+
+export interface ConfirmTaskInputPayload {
+  task_id?: string | null;
+  extraction_id: string;
+  corrections?: Record<string, unknown>;
+}
+
+export interface TaskPlanningSuggestionPayload {
+  instructions?: string | null;
+}
+
+export interface TaskPlanningSuggestionNode {
+  client_node_id: string;
+  node_order: number;
+  node_name: string;
+  action_detail: string | null;
+  tools_or_materials: string | null;
+  suggested_owner_employee_no: string | null;
+  planned_start_time: string | null;
+  planned_deadline: string | null;
+  estimated_hours: string | null;
+  deliverable: string | null;
+  acceptance_criteria: string | null;
+  dependencies: string[];
+  enabled: boolean;
+}
+
+export interface TaskPlanningSuggestionDependency {
+  predecessor_client_node_id: string;
+  successor_client_node_id: string;
+  dependency_type: string;
+  reason: string | null;
+}
+
+export interface TaskPlanningSuggestionResponse {
+  task_id: string;
+  suggested_nodes: TaskPlanningSuggestionNode[];
+  suggested_dependencies: TaskPlanningSuggestionDependency[];
+}
+
+export interface ConfirmTaskPlanningPayload {
+  expected_task_version: number;
+  nodes: TaskPlanningNodeDraftInput[];
+  dependencies?: TaskNodeDependencyDraftInput[];
+  node_participants?: TaskNodeParticipantDraftInput[];
 }
 
 export interface ProgressReport {
@@ -246,6 +424,10 @@ export interface TaskChangeRequestPage {
   total: number;
 }
 
+export interface TaskChangeRequestActionResult extends TaskActionResult {
+  change_request: TaskChangeRequest;
+}
+
 export interface TaskNode {
   node_id: string;
   task_id: string;
@@ -319,6 +501,10 @@ export interface TaskDetail {
   ai_extraction_records?: Array<Record<string, unknown>>;
 }
 
+export interface CompletionReviewActionResult extends TaskActionResult {
+  review: TaskCompletionReview;
+}
+
 export interface AvailableActions {
   task_id: string;
   task_version: number;
@@ -337,6 +523,221 @@ export interface StatusLogPage {
     task_version: number;
     created_at: string;
   }>;
+  limit: number;
+  offset: number;
+  total: number;
+}
+
+export interface ReportDueItem {
+  task_id: string;
+  task_no: string | null;
+  task_name: string;
+  task_version: number;
+  report_period_start: string;
+  report_period_end: string;
+  overdue_seconds: number;
+}
+
+export interface ReportDueResponse {
+  items: ReportDueItem[];
+  total: number;
+  calculated_at: string;
+}
+
+export interface SystemParameter {
+  parameter_id: string;
+  param_key: string;
+  param_name: string;
+  param_value: string;
+  param_type: "number" | "string" | "boolean" | "json";
+  module: string;
+  description: string | null;
+  is_active: boolean;
+  updated_by_employee_no: string | null;
+  updated_at: string;
+}
+
+export interface SystemParameterPayload {
+  param_value: string;
+  param_type?: "number" | "string" | "boolean" | "json";
+  param_name?: string | null;
+  module?: string;
+  description?: string | null;
+  is_active?: boolean;
+}
+
+export interface EmployeeProfilePayload {
+  responsibility_text?: string | null;
+  skill_tags?: string[];
+  daily_capacity_hours?: string;
+  standard_task_count?: number;
+  standard_task_weight?: number;
+  emergency_tolerance_count?: number;
+  availability_status?: "available" | "busy" | "unavailable" | "disabled";
+}
+
+export interface EmployeeProfile extends Required<EmployeeProfilePayload> {
+  employee_no: string;
+  updated_at: string;
+}
+
+export interface RecommendationPayload {
+  task_description: string;
+  required_skill_tags?: string[];
+  department_id?: string | null;
+  limit?: number;
+}
+
+export interface Recommendation {
+  employee_no: string;
+  name: string;
+  score: string;
+  reasons: string[];
+}
+
+export interface AuthorizedScopePayload {
+  employee_no: string;
+  scope_type: "department" | "user" | "role" | "all_demo_data";
+  scope_id?: string | null;
+  permission_type?: "view" | "manage" | "export";
+  valid_from?: string | null;
+  valid_to?: string | null;
+  status?: "active" | "expired" | "disabled";
+}
+
+export interface AuthorizedScope {
+  authorized_scope_id: string;
+  employee_no: string;
+  scope_type: string;
+  scope_id: string | null;
+  permission_type: string;
+  valid_from: string | null;
+  valid_to: string | null;
+  status: string;
+  created_by_employee_no: string | null;
+  created_at: string;
+}
+
+export interface PerformanceMetricPayload {
+  metric_type: string;
+  metric_name: string;
+  period?: string | null;
+  business_unit?: string | null;
+  sequence_no?: number | null;
+  dimension?: string | null;
+  definition_formula?: string | null;
+  weight?: string | null;
+  target_value?: string | null;
+  deliverable?: string | null;
+  data_source?: string | null;
+  status?: "active" | "inactive";
+}
+
+export interface PerformanceMetric extends PerformanceMetricPayload {
+  metric_id: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PerformanceMatch {
+  performance_match_id: string;
+  task_id: string;
+  metric_id: string;
+  type_score: string;
+  business_unit_score: string;
+  metric_name_score: string;
+  definition_formula_score: string;
+  deliverable_score: string;
+  total_score: string;
+  match_level: "strong" | "weak" | "no_clear_relation";
+  match_reason: string | null;
+  is_confirmed: boolean;
+  confirmed_by_employee_no: string | null;
+  confirmed_at: string | null;
+  algorithm_version: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface WorkloadCalculationPayload {
+  period_start: string;
+  period_end: string;
+}
+
+export interface WorkloadSnapshot {
+  workload_snapshot_id: string;
+  employee_no: string;
+  period_start: string;
+  period_end: string;
+  workload_score: string;
+  workload_level: string;
+  [key: string]: unknown;
+}
+
+export interface PriorityScore {
+  priority_score_id: string;
+  task_id: string;
+  priority_quadrant: string;
+  calculated_at: string;
+  [key: string]: unknown;
+}
+
+export interface Conflict {
+  conflict_id: string;
+  conflict_type: string;
+  employee_no: string;
+  task_id: string;
+  related_task_id: string | null;
+  node_id: string | null;
+  severity: string;
+  description: string;
+  suggestion: string | null;
+  status: string;
+  resolved_by_employee_no: string | null;
+  resolution_note: string | null;
+  detected_at: string;
+  resolved_at: string | null;
+}
+
+export interface NotificationItem {
+  notification_id: string;
+  reminder_rule_id: string | null;
+  task_id: string | null;
+  issue_id: string | null;
+  recipient_employee_no: string;
+  channel: string;
+  title: string;
+  content: string;
+  send_status: string;
+  read_at: string | null;
+  created_at: string;
+  [key: string]: unknown;
+}
+
+export interface ArchivePayload {
+  summary?: string | null;
+  search_keywords?: string[];
+  review_result?: string | null;
+  risk_points?: string[];
+}
+
+export interface TaskArchive {
+  archive_id: string;
+  task_id: string;
+  archive_snapshot: Record<string, unknown>;
+  source_status_snapshot: string;
+  summary: string | null;
+  search_keywords: string[];
+  review_result: string | null;
+  risk_points: string[];
+  reusable_template: Record<string, unknown> | null;
+  actual_hours_total: string | null;
+  archived_by_employee_no: string;
+  archived_at: string;
+}
+
+export interface ArchiveSearchResponse {
+  items: TaskArchive[];
   limit: number;
   offset: number;
   total: number;

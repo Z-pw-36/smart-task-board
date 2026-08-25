@@ -8,6 +8,7 @@ from datetime import UTC, datetime, time, timedelta
 from decimal import Decimal
 from typing import Protocol
 from uuid import UUID, uuid4
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from sqlalchemy import and_, exists, func, or_, select
 from sqlalchemy.orm import Session
@@ -41,10 +42,8 @@ from app.services.commands import (
     CreateTaskDraftCommand,
     TaskNodeDependencyDraft,
     TaskNodeDraft,
-    TaskNodeParticipantDraft,
     TaskParticipantDraft,
 )
-from app.services.dependency_graph import validate_dependency_graph
 from app.services.errors import (
     BusinessValidationError,
     EntityNotFoundError,
@@ -244,6 +243,51 @@ DEFAULT_PARAMETERS: dict[str, tuple[str, str, str, str, str]] = {
         "priority",
         "Urgent quadrant threshold.",
     ),
+}
+
+INTAKE_FIELD_ALIASES = {
+    "taskDraft": "task_draft",
+    "taskName": "task_name",
+    "taskDescription": "task_description",
+    "taskGoal": "task_goal",
+    "taskSource": "task_source",
+    "mainAssigneeEmployeeNo": "main_assignee_employee_no",
+    "reportToEmployeeNo": "report_to_employee_no",
+    "reportToLevel": "report_to_level",
+    "reviewerEmployeeNo": "reviewer_employee_no",
+    "departmentId": "department_id",
+    "startTime": "start_time",
+    "deadline": "deadline",
+    "estimatedHours": "estimated_hours",
+    "taskWeight": "task_weight",
+    "deliverable": "deliverable",
+    "acceptanceCriteria": "acceptance_criteria",
+    "isUrgent": "is_urgent",
+    "reportCycle": "report_cycle",
+    "collaboratorEmployeeNos": "collaborators",
+}
+
+INTAKE_NODE_ALIASES = {
+    "clientNodeId": "client_node_id",
+    "nodeOrder": "node_order",
+    "nodeName": "node_name",
+    "actionDetail": "action_detail",
+    "toolsOrMaterials": "tools_or_materials",
+    "ownerEmployeeNo": "owner_employee_no",
+    "collaboratorEmployeeNos": "collaborators",
+    "plannedStartTime": "planned_start_time",
+    "plannedDeadline": "planned_deadline",
+    "estimatedHours": "estimated_hours",
+    "deliverable": "deliverable",
+    "acceptanceCriteria": "acceptance_criteria",
+}
+
+INTAKE_DEPENDENCY_ALIASES = {
+    "predecessorClientNodeId": "predecessor_client_node_id",
+    "successorClientNodeId": "successor_client_node_id",
+    "predecessorNodeId": "predecessor_client_node_id",
+    "successorNodeId": "successor_client_node_id",
+    "dependencyType": "dependency_type",
 }
 
 
@@ -481,6 +525,37 @@ class PermissionScopeService:
                     return True
         return False
 
+    def can_assign_employee(
+        self,
+        actor: str,
+        target_employee_no: str,
+        permission_type: str = "manage",
+    ) -> bool:
+        actor_user = self.session.get(User, actor)
+        if actor_user is None or actor_user.status != "active":
+            return False
+        target = self.session.get(User, target_employee_no)
+        if target is None or target.status != "active":
+            return False
+        if actor_user.role_type == "admin" or actor == target_employee_no:
+            return True
+        if target.manager_employee_no == actor:
+            return True
+        for scope in self._active_scopes(actor, permission_type):
+            if scope.scope_type == "all_demo_data":
+                return True
+            if scope.scope_type == "user" and scope.scope_id == target_employee_no:
+                return True
+            if scope.scope_type == "role" and scope.scope_id == target.role_type:
+                return True
+            if (
+                scope.scope_type == "department"
+                and scope.scope_id
+                and self._department_scope_matches(target.department_id, scope.scope_id)
+            ):
+                return True
+        return False
+
     def assert_can_view_task(self, actor: str, task_id: UUID) -> Task:
         task = self.session.get(Task, task_id)
         if task is None:
@@ -655,12 +730,13 @@ class FakeASRProvider:
 
 class FakeTaskExtractionProvider:
     CRITICAL_FIELDS = (
+        "task_name",
+        "task_description",
         "main_assignee_employee_no",
         "report_to_employee_no",
+        "reviewer_employee_no",
         "deadline",
-        "estimated_hours",
-        "performance_metric",
-        "acceptance_criteria",
+        "task_weight",
     )
 
     def extract(self, text: str, context: Mapping[str, object] | None = None) -> dict[str, object]:
@@ -669,8 +745,11 @@ class FakeTaskExtractionProvider:
         merged.setdefault("task_name", normalized.splitlines()[0][:80] or "Untitled task")
         merged.setdefault("task_description", normalized)
         merged.setdefault("task_source", "manual")
+        merged.setdefault("task_weight", 3)
         for key, value in self._parse_key_values(normalized).items():
             merged[key] = value
+        if not merged.get("reviewer_employee_no") and merged.get("report_to_employee_no"):
+            merged["reviewer_employee_no"] = merged["report_to_employee_no"]
         missing = [field for field in self.CRITICAL_FIELDS if not merged.get(field)]
         low_confidence = [
             field
@@ -795,6 +874,7 @@ class TaskIntakeService:
         asr_provider: ASRProvider | None = None,
         extraction_provider: TaskExtractionProvider | None = None,
         decomposition_provider: TaskDecompositionProvider | None = None,
+        agent_timezone: str = "Asia/Shanghai",
         clock=_now,
     ) -> None:
         self.session = session
@@ -802,6 +882,7 @@ class TaskIntakeService:
         self.asr_provider = asr_provider or FakeASRProvider()
         self.extraction_provider = extraction_provider or FakeTaskExtractionProvider()
         self.decomposition_provider = decomposition_provider or FakeTaskDecompositionProvider()
+        self.agent_timezone = agent_timezone
         self.clock = clock
 
     def submit_input(
@@ -837,7 +918,20 @@ class TaskIntakeService:
             submitted_by_employee_no=actor,
             submitted_at=now,
         )
-        extracted = self.extraction_provider.extract(text)
+        context = (
+            self._agent_context(
+                actor,
+                input_id=task_input.input_id,
+                input_type=input_type,
+                raw_text=raw_text,
+                asr_text=task_input.asr_text,
+                source_channel=source_channel,
+                now=now,
+            )
+            if self._uses_structured_agent_context()
+            else None
+        )
+        extracted = self.extraction_provider.extract(text, context=context)
         extraction = AIExtractionRecord(
             input_id=task_input.input_id,
             extracted_json=_json_value(extracted["extracted_json"]),
@@ -867,9 +961,22 @@ class TaskIntakeService:
         if task_input.submitted_by_employee_no != actor:
             raise PermissionDeniedError("actor cannot clarify this task input")
         previous = self._latest_extraction(input_id)
-        context = dict(previous.extracted_json) if previous is not None else {}
-        context.update(dict(answers))
         source_text = task_input.asr_text or task_input.raw_text or ""
+        context = (
+            self._agent_context(
+                actor,
+                input_id=input_id,
+                input_type=task_input.input_type,
+                raw_text=task_input.raw_text,
+                asr_text=task_input.asr_text,
+                source_channel=task_input.source_channel,
+                now=self.clock(),
+                previous=previous,
+                answers=answers,
+            )
+            if self._uses_structured_agent_context()
+            else self._legacy_clarification_context(previous, answers)
+        )
         extracted = self.extraction_provider.extract(source_text, context=context)
         now = self.clock()
         extraction = AIExtractionRecord(
@@ -917,59 +1024,20 @@ class TaskIntakeService:
             if task is None:
                 raise EntityNotFoundError("linked task was not found")
             return task
-        payload = dict(extraction.extracted_json)
-        payload.update(corrections or {})
+        payload = self._normalize_extraction_payload(extraction.extracted_json)
+        payload.update(self._normalize_extraction_payload(corrections or {}))
         missing = [
             field
             for field in FakeTaskExtractionProvider.CRITICAL_FIELDS
-            if not payload.get(field) and field != "performance_metric"
+            if not payload.get(field)
         ]
         if missing:
             raise BusinessValidationError(
                 "missing required confirmation fields: " + ", ".join(missing)
             )
-        decomp = self.decomposition_provider.decompose(payload)
-        node_ids: list[UUID] = []
-        nodes: list[TaskNodeDraft] = []
-        dependencies: list[TaskNodeDependencyDraft] = []
-        node_participants: list[TaskNodeParticipantDraft] = []
-        for index, node_payload in enumerate(decomp.get("nodes", []), start=1):
-            if not isinstance(node_payload, Mapping):
-                raise BusinessValidationError("decomposition nodes must be objects")
-            node_id = uuid4()
-            node_ids.append(node_id)
-            nodes.append(
-                TaskNodeDraft(
-                    node_id=node_id,
-                    node_order=index,
-                    node_name=_required_text(str(node_payload.get("node_name") or ""), "node_name"),
-                    action_detail=str(node_payload.get("action_detail") or ""),
-                    tools_or_materials=str(node_payload.get("tools_or_materials") or ""),
-                    owner_employee_no=node_payload.get("owner_employee_no")
-                    or payload.get("main_assignee_employee_no"),
-                    estimated_hours=_decimal(node_payload.get("estimated_hours")),
-                    deliverable=str(node_payload.get("deliverable") or ""),
-                    acceptance_criteria=str(node_payload.get("acceptance_criteria") or ""),
-                )
-            )
-            for collaborator in node_payload.get("collaborators") or []:
-                node_participants.append(
-                    TaskNodeParticipantDraft(node_id, str(collaborator), "collaborator")
-                )
-        for index, node_payload in enumerate(decomp.get("nodes", [])):
-            for predecessor_index in node_payload.get("dependencies") or []:
-                dependencies.append(
-                    TaskNodeDependencyDraft(
-                        node_ids[int(predecessor_index)],
-                        node_ids[index],
-                    )
-                )
-        validate_dependency_graph(
-            node_ids, ((item.predecessor_node_id, item.successor_node_id) for item in dependencies)
-        )
         participants = tuple(
             TaskParticipantDraft(str(employee_no), "collaborator")
-            for employee_no in payload.get("collaborators", [])
+            for employee_no in self._sequence(payload.get("collaborators"))
         )
         command = CreateTaskDraftCommand(
             task_id=task_id or uuid4(),
@@ -981,9 +1049,11 @@ class TaskIntakeService:
             task_source=str(payload.get("task_source") or "ai_intake"),
             main_assignee_employee_no=str(payload.get("main_assignee_employee_no")),
             report_to_employee_no=str(payload.get("report_to_employee_no")),
+            report_to_level=payload.get("report_to_level"),
             reviewer_employee_no=payload.get("reviewer_employee_no")
             or payload.get("report_to_employee_no"),
             department_id=_optional_uuid(payload.get("department_id"), "department_id"),
+            start_time=self._optional_datetime(payload.get("start_time"), "start_time"),
             deadline=(
                 datetime.fromisoformat(str(payload["deadline"]))
                 if payload.get("deadline")
@@ -992,16 +1062,127 @@ class TaskIntakeService:
             estimated_hours=_decimal(payload.get("estimated_hours")),
             task_weight=int(payload.get("task_weight") or 3),
             deliverable=payload.get("deliverable"),
-            acceptance_criteria=str(payload.get("acceptance_criteria")),
+            acceptance_criteria=str(payload.get("acceptance_criteria") or ""),
             is_urgent=bool(payload.get("is_urgent", False)),
+            report_cycle=payload.get("report_cycle"),
             participants=participants,
-            nodes=tuple(nodes),
-            dependencies=tuple(dependencies),
-            node_participants=tuple(node_participants),
             extraction_record_ids=(extraction_id,),
         )
         task = TaskWorkflowService(self.uow_factory, clock=self.clock).create_task_draft(command)
         return task
+
+    def suggest_task_plan(
+        self,
+        actor: str,
+        task_id: UUID,
+        *,
+        instructions: str | None = None,
+    ) -> dict[str, object]:
+        task = self.session.get(Task, task_id)
+        if task is None:
+            raise EntityNotFoundError("task was not found")
+        if task.main_assignee_employee_no != actor:
+            raise PermissionDeniedError("actor must be the task main assignee")
+        if task.status != "in_progress":
+            raise BusinessValidationError("task planning requires an accepted task")
+
+        extraction = self._latest_confirmed_extraction(task.task_id)
+        payload = self._task_payload_for_decomposition(task)
+        if extraction is not None:
+            payload = {
+                **self._normalize_extraction_payload(extraction.extracted_json),
+                **payload,
+            }
+        if instructions and instructions.strip():
+            payload["planning_instructions"] = instructions.strip()
+        if self._uses_structured_agent_context():
+            now = self.clock()
+            payload.update(
+                {
+                    "mode": "task_decomposition",
+                    "currentUser": self._agent_user(self.session.get(User, actor)),
+                    "candidateUsers": self._agent_candidate_users(),
+                    "performanceMetrics": self._agent_performance_metrics(),
+                    "rules": {
+                        "timezone": self.agent_timezone,
+                        "now": self._agent_now(now),
+                        "nodeCountMin": 5,
+                        "nodeCountMax": 10,
+                    },
+                }
+            )
+
+        decomp = self.decomposition_provider.decompose(payload)
+        return self._planning_suggestion_response(actor, task, decomp)
+
+    @staticmethod
+    def _normalize_extraction_payload(payload: Mapping[str, object]) -> dict[str, object]:
+        normalized: dict[str, object] = {}
+        task_draft = payload.get("taskDraft") or payload.get("task_draft")
+        if isinstance(task_draft, Mapping):
+            normalized.update(TaskIntakeService._normalize_extraction_payload(task_draft))
+        for key, value in payload.items():
+            normalized[INTAKE_FIELD_ALIASES.get(str(key), str(key))] = _json_value(value)
+        collaborators = normalized.get("collaborator_employee_nos")
+        if collaborators is not None and "collaborators" not in normalized:
+            normalized["collaborators"] = collaborators
+        return normalized
+
+    @staticmethod
+    def _normalize_node_payload(payload: Mapping[str, object]) -> dict[str, object]:
+        return {
+            INTAKE_NODE_ALIASES.get(str(key), str(key)): _json_value(value)
+            for key, value in payload.items()
+        }
+
+    @staticmethod
+    def _normalize_dependency_payload(payload: Mapping[str, object]) -> dict[str, object]:
+        return {
+            INTAKE_DEPENDENCY_ALIASES.get(str(key), str(key)): _json_value(value)
+            for key, value in payload.items()
+        }
+
+    @staticmethod
+    def _sequence(value: object) -> list[object]:
+        if value is None:
+            return []
+        if isinstance(value, (str, bytes, bytearray)):
+            return [value]
+        if isinstance(value, Sequence):
+            return list(value)
+        return []
+
+    @staticmethod
+    def _optional_datetime(value: object | None, field_name: str) -> datetime | None:
+        if value is None or value == "":
+            return None
+        try:
+            return datetime.fromisoformat(str(value))
+        except ValueError as exc:
+            raise BusinessValidationError(f"{field_name} must be a valid datetime") from exc
+
+    @staticmethod
+    def _dependency_from_reference(
+        predecessor: object,
+        successor_id: UUID,
+        node_ids: Sequence[UUID],
+        node_refs: Mapping[str, UUID],
+        dependency_type: str,
+    ) -> TaskNodeDependencyDraft | None:
+        predecessor_id: UUID | None = None
+        if isinstance(predecessor, int):
+            if 0 <= predecessor < len(node_ids):
+                predecessor_id = node_ids[predecessor]
+        else:
+            reference = str(predecessor)
+            if reference.isdigit():
+                index = int(reference)
+                if 0 <= index < len(node_ids):
+                    predecessor_id = node_ids[index]
+            predecessor_id = predecessor_id or node_refs.get(reference)
+        if predecessor_id is None:
+            return None
+        return TaskNodeDependencyDraft(predecessor_id, successor_id, dependency_type)
 
     def _latest_extraction(self, input_id: UUID) -> AIExtractionRecord | None:
         statement = (
@@ -1012,11 +1193,293 @@ class TaskIntakeService:
         )
         return self.session.scalar(statement)
 
+    def _latest_confirmed_extraction(self, task_id: UUID) -> AIExtractionRecord | None:
+        statement = (
+            select(AIExtractionRecord)
+            .where(AIExtractionRecord.task_id == task_id)
+            .order_by(AIExtractionRecord.confirmed_at.desc().nulls_last())
+            .limit(1)
+        )
+        return self.session.scalar(statement)
+
+    def _task_payload_for_decomposition(self, task: Task) -> dict[str, object]:
+        participants = [
+            participant.employee_no
+            for participant in self.session.scalars(
+                select(TaskParticipant)
+                .where(
+                    TaskParticipant.task_id == task.task_id,
+                    TaskParticipant.participant_role == "collaborator",
+                )
+                .order_by(TaskParticipant.employee_no)
+            ).all()
+        ]
+        return {
+            "task_id": str(task.task_id),
+            "task_name": task.task_name,
+            "task_description": task.task_description,
+            "task_goal": task.task_goal,
+            "task_source": task.task_source,
+            "main_assignee_employee_no": task.main_assignee_employee_no,
+            "report_to_employee_no": task.report_to_employee_no,
+            "reviewer_employee_no": task.reviewer_employee_no,
+            "department_id": str(task.department_id) if task.department_id else None,
+            "start_time": task.start_time.isoformat() if task.start_time else None,
+            "deadline": task.deadline.isoformat() if task.deadline else None,
+            "estimated_hours": (
+                str(task.estimated_hours) if task.estimated_hours is not None else None
+            ),
+            "task_weight": task.task_weight,
+            "deliverable": task.deliverable,
+            "acceptance_criteria": task.acceptance_criteria,
+            "is_urgent": task.is_urgent,
+            "report_cycle": task.report_cycle,
+            "collaborators": participants,
+        }
+
+    def _planning_suggestion_response(
+        self,
+        actor: str,
+        task: Task,
+        decomp: Mapping[str, object],
+    ) -> dict[str, object]:
+        raw_nodes = self._sequence(decomp.get("nodes"))
+        nodes: list[dict[str, object]] = []
+        permission = PermissionScopeService(self.session, clock=self.clock)
+        task_people = {
+            task.creator_employee_no,
+            task.main_assignee_employee_no,
+            task.report_to_employee_no,
+            task.reviewer_employee_no,
+            *(
+                participant.employee_no
+                for participant in self.session.scalars(
+                    select(TaskParticipant).where(TaskParticipant.task_id == task.task_id)
+                ).all()
+            ),
+        } - {None}
+        for index, node_payload in enumerate(raw_nodes, start=1):
+            if not isinstance(node_payload, Mapping):
+                raise BusinessValidationError("decomposition nodes must be objects")
+            normalized = self._normalize_node_payload(node_payload)
+            client_node_id = str(normalized.get("client_node_id") or f"draft-node-{index}")
+            suggested_owner = normalized.get("owner_employee_no")
+            suggested_owner_text = (
+                str(suggested_owner)
+                if isinstance(suggested_owner, str)
+                and (
+                    suggested_owner in task_people
+                    or permission.can_assign_employee(actor, suggested_owner)
+                )
+                else None
+            )
+            nodes.append(
+                {
+                    "client_node_id": client_node_id,
+                    "node_order": int(normalized.get("node_order") or index),
+                    "node_name": str(normalized.get("node_name") or f"节点 {index}").strip(),
+                    "action_detail": normalized.get("action_detail"),
+                    "tools_or_materials": normalized.get("tools_or_materials"),
+                    "suggested_owner_employee_no": suggested_owner_text,
+                    "planned_start_time": self._optional_datetime(
+                        normalized.get("planned_start_time"), "planned_start_time"
+                    ),
+                    "planned_deadline": self._optional_datetime(
+                        normalized.get("planned_deadline"), "planned_deadline"
+                    ),
+                    "estimated_hours": _decimal(normalized.get("estimated_hours")),
+                    "deliverable": normalized.get("deliverable"),
+                    "acceptance_criteria": normalized.get("acceptance_criteria"),
+                    "dependencies": [
+                        str(item) for item in self._sequence(normalized.get("dependencies"))
+                    ],
+                    "enabled": True,
+                }
+            )
+        dependencies: list[dict[str, object]] = []
+        seen: set[tuple[str, str, str]] = set()
+        for index, node_payload in enumerate(raw_nodes):
+            if not isinstance(node_payload, Mapping):
+                continue
+            normalized = self._normalize_node_payload(node_payload)
+            successor = str(normalized.get("client_node_id") or f"draft-node-{index + 1}")
+            for predecessor in self._sequence(normalized.get("dependencies")):
+                predecessor_ref = self._dependency_reference_to_client_id(
+                    predecessor, index, raw_nodes
+                )
+                if predecessor_ref is None:
+                    continue
+                key = (predecessor_ref, successor, "finish_to_start")
+                if key not in seen:
+                    seen.add(key)
+                    dependencies.append(
+                        {
+                            "predecessor_client_node_id": predecessor_ref,
+                            "successor_client_node_id": successor,
+                            "dependency_type": "finish_to_start",
+                            "reason": None,
+                        }
+                    )
+        for dependency_payload in self._sequence(decomp.get("dependencies")):
+            if not isinstance(dependency_payload, Mapping):
+                continue
+            normalized = self._normalize_dependency_payload(dependency_payload)
+            predecessor = normalized.get("predecessor_client_node_id")
+            successor = normalized.get("successor_client_node_id")
+            dependency_type = str(normalized.get("dependency_type") or "finish_to_start")
+            if predecessor is None or successor is None:
+                continue
+            key = (str(predecessor), str(successor), dependency_type)
+            if key in seen:
+                continue
+            seen.add(key)
+            dependencies.append(
+                {
+                    "predecessor_client_node_id": str(predecessor),
+                    "successor_client_node_id": str(successor),
+                    "dependency_type": dependency_type,
+                    "reason": normalized.get("reason"),
+                }
+            )
+        return {
+            "task_id": task.task_id,
+            "suggested_nodes": nodes,
+            "suggested_dependencies": dependencies,
+        }
+
+    def _dependency_reference_to_client_id(
+        self,
+        predecessor: object,
+        current_index: int,
+        raw_nodes: Sequence[object],
+    ) -> str | None:
+        if isinstance(predecessor, int):
+            return self._client_id_at_index(predecessor, raw_nodes)
+        reference = str(predecessor)
+        if reference.isdigit():
+            by_index = self._client_id_at_index(int(reference), raw_nodes)
+            if by_index is not None:
+                return by_index
+        return reference or None
+
+    def _client_id_at_index(self, index: int, raw_nodes: Sequence[object]) -> str | None:
+        if not 0 <= index < len(raw_nodes):
+            return None
+        item = raw_nodes[index]
+        if not isinstance(item, Mapping):
+            return None
+        normalized = self._normalize_node_payload(item)
+        return str(normalized.get("client_node_id") or f"draft-node-{index + 1}")
+
     def _require_active_user(self, actor: str) -> User:
         user = self.session.get(User, actor)
         if user is None or user.status != "active":
             raise PermissionDeniedError("actor is not active")
         return user
+
+    def _uses_structured_agent_context(self) -> bool:
+        return bool(getattr(self.extraction_provider, "uses_structured_context", False))
+
+    @staticmethod
+    def _legacy_clarification_context(
+        previous: AIExtractionRecord | None,
+        answers: Mapping[str, object],
+    ) -> dict[str, object]:
+        context = dict(previous.extracted_json) if previous is not None else {}
+        context.update(dict(answers))
+        return context
+
+    def _agent_context(
+        self,
+        actor: str,
+        *,
+        input_id: UUID,
+        input_type: str,
+        raw_text: str | None,
+        asr_text: str | None,
+        source_channel: str,
+        now: datetime,
+        previous: AIExtractionRecord | None = None,
+        answers: Mapping[str, object] | None = None,
+    ) -> dict[str, object]:
+        user = self.session.get(User, actor)
+        return {
+            "input": {
+                "inputId": str(input_id),
+                "inputType": input_type,
+                "rawText": raw_text or "",
+                "asrText": asr_text or "",
+                "attachmentTexts": [],
+                "sourceChannel": source_channel,
+            },
+            "currentUser": self._agent_user(user),
+            "candidateUsers": self._agent_candidate_users(),
+            "performanceMetrics": self._agent_performance_metrics(),
+            "rules": {
+                "timezone": self.agent_timezone,
+                "now": self._agent_now(now),
+                "nodeCountMin": 5,
+                "nodeCountMax": 10,
+            },
+            "previousExtraction": previous.extracted_json if previous is not None else None,
+            "answers": _json_value(answers or {}),
+        }
+
+    def _agent_candidate_users(self) -> list[dict[str, object]]:
+        statement = (
+            select(User)
+            .where(User.status == "active")
+            .order_by(User.employee_no)
+            .limit(100)
+        )
+        return [self._agent_user(user) for user in self.session.scalars(statement).all()]
+
+    def _agent_performance_metrics(self) -> list[dict[str, object]]:
+        statement = (
+            select(PerformanceMetric)
+            .where(PerformanceMetric.status == "active")
+            .order_by(PerformanceMetric.business_unit, PerformanceMetric.metric_name)
+            .limit(100)
+        )
+        metrics: list[dict[str, object]] = []
+        for metric in self.session.scalars(statement).all():
+            metrics.append(
+                {
+                    "metricId": str(metric.metric_id),
+                    "metricType": metric.metric_type,
+                    "businessUnit": metric.business_unit,
+                    "metricName": metric.metric_name,
+                    "definitionFormula": metric.definition_formula,
+                    "targetValue": metric.target_value,
+                }
+            )
+        return metrics
+
+    @staticmethod
+    def _agent_user(user: User | None) -> dict[str, object]:
+        if user is None:
+            return {}
+        department = getattr(user, "department", None)
+        profile = getattr(user, "employee_profile", None)
+        return {
+            "employeeNo": user.employee_no,
+            "name": user.name,
+            "departmentId": str(user.department_id) if user.department_id is not None else None,
+            "departmentName": getattr(department, "department_name", None),
+            "position": user.position,
+            "orgLevel": user.org_level,
+            "responsibilityText": getattr(profile, "responsibility_text", None),
+            "skillTags": list(getattr(profile, "skill_tags", []) or []),
+            "workloadScore": None,
+            "workloadLevel": getattr(profile, "availability_status", None),
+        }
+
+    def _agent_now(self, now: datetime) -> str:
+        try:
+            timezone = ZoneInfo(self.agent_timezone)
+        except ZoneInfoNotFoundError:
+            timezone = UTC
+        return now.astimezone(timezone).isoformat()
 
 
 class PerformanceMetricService:

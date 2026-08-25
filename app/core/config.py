@@ -24,6 +24,11 @@ class Settings(BaseSettings):
     jwt_expire_minutes: int = Field(default=30, ge=1, le=1440)
     allow_test_employee_header: bool = True
     cors_allowed_origins: str = ""
+    ai_provider: Literal["fake", "openai_compatible"] = "fake"
+    ai_api_key: SecretStr | None = Field(default=None, repr=False)
+    ai_base_url: str | None = Field(default=None, repr=False)
+    ai_model: str | None = Field(default=None, repr=False)
+    ai_request_timeout_seconds: int = Field(default=30, ge=1, le=120)
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -73,6 +78,13 @@ class Settings(BaseSettings):
                 raise ValueError("ALLOW_TEST_EMPLOYEE_HEADER must be false in prototype auth mode")
         if self.auth_mode == "test_header" and not self.allow_test_employee_header:
             raise ValueError("test_header auth mode requires ALLOW_TEST_EMPLOYEE_HEADER=true")
+        if self.ai_provider == "openai_compatible":
+            if self.ai_api_key is None or not self.ai_api_key.get_secret_value().strip():
+                raise ValueError("AI_API_KEY is required when AI_PROVIDER=openai_compatible")
+            if not self.ai_base_url or not self.ai_base_url.strip():
+                raise ValueError("AI_BASE_URL is required when AI_PROVIDER=openai_compatible")
+            if not self.ai_model or not self.ai_model.strip():
+                raise ValueError("AI_MODEL is required when AI_PROVIDER=openai_compatible")
         return self
 
 

@@ -329,6 +329,29 @@ class ArchiveSearchResponse(StrictSchema):
     total: int
 
 
+class OperationLogResponse(StrictSchema):
+    operation_log_id: UUID
+    request_id: str | None
+    operator_employee_no: str | None
+    action: str
+    object_type: str
+    object_id: str
+    before_data: dict[str, Any] | None
+    after_data: dict[str, Any] | None
+    ip_address: str | None
+    user_agent: str | None
+    result: str
+    error_message: str | None
+    created_at: datetime
+
+
+class OperationLogPageResponse(StrictSchema):
+    items: list[OperationLogResponse]
+    limit: int
+    offset: int
+    total: int
+
+
 class ReuseArchiveRequest(StrictSchema):
     task_id: UUID | None = None
     task_name: NonBlankString | None = None

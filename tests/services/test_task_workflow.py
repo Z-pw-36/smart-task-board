@@ -75,13 +75,16 @@ def _workflow_context(
     nodes: list[TaskNode] | None = None,
     participant: TaskParticipant | None = None,
 ) -> tuple[TaskWorkflowService, MagicMock]:
+    primary_participant = participant or _participant(task)
     uow = MagicMock()
     uow.__enter__.return_value = uow
     uow.__exit__.return_value = False
     uow.tasks.get_by_id_for_update.return_value = task
-    uow.tasks.find_participant.return_value = participant or _participant(task)
+    uow.tasks.find_participant.return_value = primary_participant
+    uow.tasks.list_participants.return_value = [primary_participant]
     uow.task_nodes.list_nodes.return_value = nodes or []
     uow.task_nodes.list_dependencies.return_value = []
+    uow.task_nodes.list_participants_by_task_id.return_value = []
     uow.task_issues.has_non_closed.return_value = False
     uow.task_completion_reviews.add.side_effect = lambda value: value
     uow.task_completion_reviews.next_round.return_value = 1
@@ -213,6 +216,53 @@ def test_create_task_draft_builds_complete_aggregate_and_log() -> None:
     uow.commit.assert_called_once_with()
 
 
+def test_create_task_draft_can_be_published_without_nodes() -> None:
+    uow = MagicMock()
+    uow.__enter__.return_value = uow
+    uow.__exit__.return_value = False
+    uow.tasks.get_by_id_for_update.return_value = None
+    uow.users.get_by_employee_no.side_effect = lambda employee_no: User(
+        employee_no=employee_no,
+        name=employee_no,
+        role_type="employee",
+        status="active",
+    )
+    uow.task_nodes.list_nodes.return_value = []
+    uow.task_nodes.list_dependencies.return_value = []
+    uow.task_status_logs.add.side_effect = lambda value: value
+    command = CreateTaskDraftCommand(
+        task_name="Planning later",
+        creator_employee_no="CREATOR",
+        main_assignee_employee_no="ASSIGNEE",
+        operation_source="unit-test",
+    )
+    service = TaskWorkflowService(Mock(return_value=uow), clock=lambda: NOW)
+
+    task = service.create_task_draft(command)
+
+    assert task.status == "draft"
+    assert uow.task_nodes.add_node.call_count == 0
+    assert uow.task_nodes.add_dependency.call_count == 0
+    uow.tasks.get_by_id_for_update.return_value = task
+    uow.tasks.find_participant.return_value = TaskParticipant(
+        task_id=task.task_id,
+        employee_no="ASSIGNEE",
+        participant_role="assignee",
+        is_primary=True,
+    )
+
+    submitted = service.submit_for_confirmation(
+        task.task_id,
+        "CREATOR",
+        1,
+        "unit-test",
+    )
+
+    assert submitted.status == "pending_confirmation"
+    assert submitted.task_version == 2
+    assert uow.commit.call_count == 2
+
+
 def test_create_task_draft_rejects_cycle_before_opening_transaction() -> None:
     first, second = uuid4(), uuid4()
     factory = Mock()
@@ -236,15 +286,7 @@ def test_create_task_draft_rejects_cycle_before_opening_transaction() -> None:
 
 def test_submit_for_confirmation_increments_once_and_logs() -> None:
     task = _task(status="draft", version=4)
-    node = TaskNode(
-        node_id=uuid4(),
-        task_id=task.task_id,
-        node_order=1,
-        node_name="Node",
-        status="pending",
-        progress_percent=0,
-    )
-    service, uow = _workflow_context(task, nodes=[node])
+    service, uow = _workflow_context(task)
 
     result = service.submit_for_confirmation(
         task.task_id,
@@ -263,6 +305,199 @@ def test_submit_for_confirmation_increments_once_and_logs() -> None:
         5,
     )
     uow.commit.assert_called_once_with()
+
+
+def test_confirm_task_plan_is_main_assignee_only_and_persists_nodes() -> None:
+    task = _task(
+        status="in_progress",
+        version=4,
+    )
+    task.deadline = datetime(2026, 8, 30, tzinfo=UTC)
+    collaborator = TaskParticipant(
+        task_id=task.task_id,
+        employee_no="COLLAB",
+        participant_role="collaborator",
+        is_primary=False,
+    )
+    first = uuid4()
+    second = uuid4()
+    service, uow = _workflow_context(task)
+    uow.tasks.list_participants.return_value = [_participant(task), collaborator]
+    uow.users.get_by_employee_no.side_effect = lambda employee_no: User(
+        employee_no=employee_no,
+        name=employee_no,
+        role_type="employee",
+        status="active",
+    )
+
+    with pytest.raises(PermissionDeniedError):
+        service.confirm_task_plan(
+            task.task_id,
+            "CREATOR",
+            4,
+            "unit-test",
+            (
+                TaskNodeDraft(
+                    first,
+                    1,
+                    "Confirm scope",
+                    owner_employee_no="ASSIGNEE",
+                    planned_deadline=datetime(2026, 8, 25, tzinfo=UTC),
+                ),
+            ),
+        )
+
+    result = service.confirm_task_plan(
+        task.task_id,
+        "ASSIGNEE",
+        4,
+        "unit-test",
+        (
+            TaskNodeDraft(
+                first,
+                1,
+                "Confirm scope",
+                owner_employee_no="ASSIGNEE",
+                planned_deadline=datetime(2026, 8, 25, tzinfo=UTC),
+                deliverable="Scope notes",
+                acceptance_criteria="Scope is approved",
+            ),
+            TaskNodeDraft(
+                second,
+                2,
+                "Deliver output",
+                owner_employee_no="COLLAB",
+                planned_deadline=datetime(2026, 8, 29, tzinfo=UTC),
+                deliverable="Final package",
+                acceptance_criteria="Package is reviewed",
+            ),
+        ),
+        (TaskNodeDependencyDraft(first, second),),
+        (TaskNodeParticipantDraft(second, "COLLAB", "collaborator"),),
+    )
+
+    assert result.status == "in_progress"
+    assert result.task_version == 5
+    assert uow.task_nodes.add_node.call_count == 2
+    assert uow.task_nodes.add_dependency.call_count == 1
+    assert uow.task_nodes.add_participant.call_count == 3
+    persisted_node = uow.task_nodes.add_node.call_args_list[1].args[0]
+    assert persisted_node.owner_employee_no == "COLLAB"
+    assert persisted_node.planned_deadline == datetime(2026, 8, 29, tzinfo=UTC)
+    assert _last_log(uow).action_type == "task_plan_confirmed"
+
+
+def test_confirm_task_plan_rejects_missing_or_late_deadlines() -> None:
+    task = _task(status="in_progress", version=4)
+    task.deadline = datetime(2026, 8, 30, tzinfo=UTC)
+    service, uow = _workflow_context(task)
+    uow.users.get_by_employee_no.side_effect = lambda employee_no: User(
+        employee_no=employee_no,
+        name=employee_no,
+        role_type="employee",
+        status="active",
+    )
+
+    with pytest.raises(BusinessValidationError, match="planned_deadline"):
+        service.confirm_task_plan(
+            task.task_id,
+            "ASSIGNEE",
+            4,
+            "unit-test",
+            (TaskNodeDraft(uuid4(), 1, "Missing deadline", owner_employee_no="ASSIGNEE"),),
+        )
+    with pytest.raises(BusinessValidationError, match="must not exceed task deadline"):
+        service.confirm_task_plan(
+            task.task_id,
+            "ASSIGNEE",
+            4,
+            "unit-test",
+            (
+                TaskNodeDraft(
+                    uuid4(),
+                    1,
+                    "Late node",
+                    owner_employee_no="ASSIGNEE",
+                    planned_deadline=datetime(2026, 9, 1, tzinfo=UTC),
+                ),
+            ),
+        )
+
+    assert uow.commit.call_count == 0
+
+
+def test_confirm_task_plan_rejects_dependency_deadline_inversion() -> None:
+    task = _task(status="in_progress", version=4)
+    task.deadline = datetime(2026, 8, 30, tzinfo=UTC)
+    first = uuid4()
+    second = uuid4()
+    service, uow = _workflow_context(task)
+    uow.users.get_by_employee_no.side_effect = lambda employee_no: User(
+        employee_no=employee_no,
+        name=employee_no,
+        role_type="employee",
+        status="active",
+    )
+
+    with pytest.raises(BusinessValidationError, match="predecessor deadline"):
+        service.confirm_task_plan(
+            task.task_id,
+            "ASSIGNEE",
+            4,
+            "unit-test",
+            (
+                TaskNodeDraft(
+                    first,
+                    1,
+                    "Later prerequisite",
+                    owner_employee_no="ASSIGNEE",
+                    planned_deadline=datetime(2026, 8, 29, tzinfo=UTC),
+                ),
+                TaskNodeDraft(
+                    second,
+                    2,
+                    "Earlier successor",
+                    owner_employee_no="ASSIGNEE",
+                    planned_deadline=datetime(2026, 8, 28, tzinfo=UTC),
+                ),
+            ),
+            (TaskNodeDependencyDraft(first, second),),
+        )
+
+    assert uow.task_nodes.add_node.call_count == 0
+    assert uow.commit.call_count == 0
+
+
+def test_confirm_task_plan_rejects_unscoped_node_owner() -> None:
+    task = _task(status="in_progress", version=4)
+    task.deadline = datetime(2026, 8, 30, tzinfo=UTC)
+    service, uow = _workflow_context(task)
+    uow.users.get_by_employee_no.side_effect = lambda employee_no: User(
+        employee_no=employee_no,
+        name=employee_no,
+        role_type="employee",
+        status="active",
+    )
+
+    with pytest.raises(PermissionDeniedError, match="assign"):
+        service.confirm_task_plan(
+            task.task_id,
+            "ASSIGNEE",
+            4,
+            "unit-test",
+            (
+                TaskNodeDraft(
+                    uuid4(),
+                    1,
+                    "External owner",
+                    owner_employee_no="OUTSIDER",
+                    planned_deadline=datetime(2026, 8, 29, tzinfo=UTC),
+                ),
+            ),
+        )
+
+    assert uow.task_nodes.add_node.call_count == 0
+    assert uow.commit.call_count == 0
 
 
 def test_confirm_send_accept_updates_projection_and_times() -> None:

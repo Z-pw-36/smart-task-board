@@ -8,6 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.api.dependencies import (
+    get_intake_service,
     get_task_node_workflow_service,
     get_task_query_service,
     get_task_workflow_service,
@@ -152,6 +153,7 @@ def route_context() -> Iterator[tuple[TestClient, MagicMock, MagicMock, MagicMoc
     task_id, node_id = uuid4(), uuid4()
     tasks = MagicMock()
     nodes = MagicMock()
+    intake = MagicMock()
     query = MagicMock()
     tasks.create_task_draft.return_value = _task_result(task_id, "draft", 1)
     query.get_task_detail.return_value = _detail(task_id, node_id)
@@ -180,6 +182,8 @@ def route_context() -> Iterator[tuple[TestClient, MagicMock, MagicMock, MagicMoc
     app.dependency_overrides[get_task_workflow_service] = lambda: tasks
     app.dependency_overrides[get_task_node_workflow_service] = lambda: nodes
     app.dependency_overrides[get_task_query_service] = lambda: query
+    app.dependency_overrides[get_intake_service] = lambda: intake
+    tasks._intake = intake
     try:
         with TestClient(app) as client:
             yield client, tasks, nodes, query
@@ -609,6 +613,118 @@ def test_node_routes_forward_identifiers_and_do_not_commit(route_context) -> Non
     assert not hasattr(nodes, "commit") or not nodes.commit.called
 
 
+def test_task_planning_routes_are_main_assignee_service_contracts(route_context) -> None:
+    client, tasks, _, _ = route_context
+    intake = tasks._intake
+    task_id = uuid4()
+    first = uuid4()
+    second = uuid4()
+    disabled = uuid4()
+    dependency_id = uuid4()
+    ignored_dependency_id = uuid4()
+    intake.suggest_task_plan.return_value = {
+        "task_id": task_id,
+        "suggested_nodes": [
+            {
+                "client_node_id": "draft-node-1",
+                "node_order": 1,
+                "node_name": "Prepare scope",
+                "action_detail": "Confirm input scope.",
+                "tools_or_materials": None,
+                "suggested_owner_employee_no": "E-ASSIGNEE",
+                "planned_start_time": None,
+                "planned_deadline": "2026-08-25T08:00:00Z",
+                "estimated_hours": None,
+                "deliverable": "Scope note",
+                "acceptance_criteria": "Scope is approved",
+                "dependencies": [],
+                "enabled": True,
+            }
+        ],
+        "suggested_dependencies": [],
+    }
+    tasks.confirm_task_plan.return_value = _task_result(task_id, "in_progress", 5)
+
+    suggested = client.post(
+        f"/api/v1/tasks/{task_id}/planning/decompose",
+        headers={"X-Employee-No": "E-ASSIGNEE"},
+        json={"instructions": "make it execution ready"},
+    )
+    confirmed = client.post(
+        f"/api/v1/tasks/{task_id}/planning/confirm",
+        headers={"X-Employee-No": "E-ASSIGNEE"},
+        json={
+            "expected_task_version": 4,
+            "nodes": [
+                {
+                    "node_id": str(first),
+                    "node_order": 1,
+                    "node_name": "Prepare scope",
+                    "owner_employee_no": "E-ASSIGNEE",
+                    "planned_deadline": "2026-08-25T08:00:00Z",
+                    "deliverable": "Scope note",
+                    "acceptance_criteria": "Scope is approved",
+                    "enabled": True,
+                },
+                {
+                    "node_id": str(second),
+                    "node_order": 2,
+                    "node_name": "Deliver result",
+                    "owner_employee_no": "E-COLLAB",
+                    "planned_deadline": "2026-08-26T08:00:00Z",
+                    "enabled": True,
+                },
+                {
+                    "node_id": str(disabled),
+                    "node_order": 3,
+                    "node_name": "Disabled suggestion",
+                    "owner_employee_no": "E-ASSIGNEE",
+                    "planned_deadline": "2026-08-27T08:00:00Z",
+                    "enabled": False,
+                },
+            ],
+            "dependencies": [
+                {
+                    "dependency_id": str(dependency_id),
+                    "predecessor_node_id": str(first),
+                    "successor_node_id": str(second),
+                },
+                {
+                    "dependency_id": str(ignored_dependency_id),
+                    "predecessor_node_id": str(second),
+                    "successor_node_id": str(disabled),
+                },
+            ],
+            "node_participants": [
+                {
+                    "node_id": str(second),
+                    "employee_no": "E-COLLAB",
+                    "participant_role": "collaborator",
+                },
+                {
+                    "node_id": str(disabled),
+                    "employee_no": "E-COLLAB",
+                    "participant_role": "collaborator",
+                },
+            ],
+        },
+    )
+
+    assert suggested.status_code == 200
+    assert confirmed.status_code == 200
+    intake.suggest_task_plan.assert_called_once_with(
+        "E-ASSIGNEE",
+        task_id,
+        instructions="make it execution ready",
+    )
+    call = tasks.confirm_task_plan.call_args
+    assert call.args[:4] == (task_id, "E-ASSIGNEE", 4, "rest_api")
+    assert [node.node_id for node in call.args[4]] == [first, second]
+    assert [dependency.dependency_id for dependency in call.args[5]] == [dependency_id]
+    assert [participant.node_id for participant in call.args[6]] == [second]
+    assert confirmed.json()["status"] == "in_progress"
+
+
 def test_query_routes_forward_actor_and_pagination(route_context) -> None:
     client, _, _, query = route_context
     task_id, node_id = uuid4(), uuid4()
@@ -734,6 +850,8 @@ def test_openapi_and_swagger_expose_only_approved_contract(route_context) -> Non
             "GET",
             "/api/v1/tasks/{task_id}/completion-reviews/{completion_review_id}",
         ),
+        ("POST", "/api/v1/tasks/{task_id}/planning/decompose"),
+        ("POST", "/api/v1/tasks/{task_id}/planning/confirm"),
         ("POST", "/api/v1/tasks/{task_id}/actions/submit-for-confirmation"),
         ("POST", "/api/v1/tasks/{task_id}/actions/confirm-and-send"),
         ("POST", "/api/v1/tasks/{task_id}/actions/confirm-self-assigned"),
@@ -839,14 +957,14 @@ def test_openapi_and_swagger_expose_only_approved_contract(route_context) -> Non
         ("POST", "/api/v1/archives/{archive_id}/reuse"),
         ("GET", "/api/v1/operation-logs"),
     }
-    assert len(phase5_operations) == 20
+    assert len(phase5_operations) == 22
     assert phase5_operations <= api_operations
     assert batch1_operations <= api_operations
     assert batch2_operations <= api_operations
     assert wave2_operations <= api_operations
     assert business_operations <= api_operations
-    assert len({path for path in specification["paths"] if path.startswith("/api/v1")}) == 76
-    assert len(api_operations) == 82
+    assert len({path for path in specification["paths"] if path.startswith("/api/v1")}) == 78
+    assert len(api_operations) == 84
 
     security_schemes = specification["components"]["securitySchemes"]
     bearer_schemes = {

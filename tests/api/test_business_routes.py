@@ -287,6 +287,7 @@ def test_notification_archive_and_audit_routes_return_safe_shapes(
     archive_id = uuid4()
     conflict_id = uuid4()
     notification_id = uuid4()
+    operation_log_id = uuid4()
     services["planning"].resolve_conflict.return_value = SimpleNamespace(
         conflict_id=conflict_id,
         conflict_type="work_hour",
@@ -339,7 +340,28 @@ def test_notification_archive_and_audit_routes_return_safe_shapes(
         archived_by_employee_no="E-ACTOR",
         archived_at=NOW,
     )
-    services["audit"].list_logs.return_value = {"items": [], "limit": 10, "offset": 0, "total": 0}
+    services["audit"].list_logs.return_value = {
+        "items": [
+            SimpleNamespace(
+                operation_log_id=operation_log_id,
+                request_id="request-id",
+                operator_employee_no="E-ACTOR",
+                action="archive",
+                object_type="task",
+                object_id=str(task_id),
+                before_data={"status": "completed"},
+                after_data={"status": "archived"},
+                ip_address=None,
+                user_agent=None,
+                result="success",
+                error_message=None,
+                created_at=NOW,
+            )
+        ],
+        "limit": 10,
+        "offset": 0,
+        "total": 1,
+    }
 
     notifications = client.get(
         "/api/v1/notifications?unread_only=true",
@@ -373,6 +395,7 @@ def test_notification_archive_and_audit_routes_return_safe_shapes(
     ]
     assert notifications.json()[0]["notification_id"] == str(notification_id)
     assert acknowledged.json()["status"] == "acknowledged"
+    assert logs.json()["items"][0]["operation_log_id"] == str(operation_log_id)
     services["planning"].resolve_conflict.assert_called_once_with(
         "E-ACTOR",
         conflict_id,

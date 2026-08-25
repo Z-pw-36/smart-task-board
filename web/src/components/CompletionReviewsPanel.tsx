@@ -1,7 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { type FormEvent, useState } from "react";
 
-import { ApiError, apiRequest } from "../api/client";
+import { ApiError } from "../api/client";
+import { listCompletionReviews } from "../api/endpoints";
 import {
   approveCompletion,
   rejectCompletion,
@@ -11,7 +12,6 @@ import {
 import type {
   AvailableActions,
   TaskCompletionReview,
-  TaskCompletionReviewPage,
   TaskDetail,
 } from "../api/types";
 import { EmptyState, ErrorState, LoadingState } from "./Feedback";
@@ -42,10 +42,7 @@ export function CompletionReviewsPanel({ task, actions }: Props) {
 
   const reviewsQuery = useQuery({
     queryKey: ["completion-reviews", task.task_id],
-    queryFn: () =>
-      apiRequest<TaskCompletionReviewPage>(
-        `/api/v1/tasks/${task.task_id}/completion-reviews?limit=20&offset=0`,
-      ),
+    queryFn: () => listCompletionReviews(task.task_id, { limit: 20, offset: 0 }),
   });
   const reviews = [...(reviewsQuery.data?.items || [])].sort(
     (left, right) => right.review_round - left.review_round,

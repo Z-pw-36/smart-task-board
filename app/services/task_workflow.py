@@ -21,7 +21,12 @@ from app.models import (
     TaskStatusLog,
 )
 from app.services.clock import Clock, utc_now
-from app.services.commands import CreateTaskDraftCommand
+from app.services.commands import (
+    CreateTaskDraftCommand,
+    TaskNodeDependencyDraft,
+    TaskNodeDraft,
+    TaskNodeParticipantDraft,
+)
 from app.services.dependency_graph import validate_dependency_graph
 from app.services.errors import (
     BusinessValidationError,
@@ -1770,6 +1775,67 @@ class TaskWorkflowService:
             uow.commit()
             return task
 
+    def confirm_task_plan(
+        self,
+        task_id: UUID,
+        actor_employee_no: str,
+        expected_task_version: int,
+        operation_source: str,
+        nodes: Sequence[TaskNodeDraft],
+        dependencies: Sequence[TaskNodeDependencyDraft] = (),
+        node_participants: Sequence[TaskNodeParticipantDraft] = (),
+    ) -> Task:
+        normalized_source = _required_text(operation_source, "operation_source")
+        if not nodes:
+            raise BusinessValidationError("task plan must include at least one enabled node")
+        node_by_id = self._validate_plan_nodes(tuple(nodes))
+        validate_dependency_graph(
+            node_by_id,
+            ((item.predecessor_node_id, item.successor_node_id) for item in dependencies),
+        )
+
+        with self._uow_factory() as uow:
+            task = _lock_task(uow, task_id, expected_task_version)
+            _require_state(task, TASK_IN_PROGRESS)
+            _require_actor(actor_employee_no, task.main_assignee_employee_no, "main assignee")
+            existing_nodes = uow.task_nodes.list_nodes(task.task_id)
+            if any(
+                node.status != "pending" or node.progress_percent != 0
+                for node in existing_nodes
+            ):
+                raise InvalidStateTransitionError(
+                    "task plan cannot be changed after node execution starts"
+                )
+            self._validate_plan_deadlines(task, node_by_id, dependencies)
+            self._validate_plan_people(uow, task, actor_employee_no, nodes, node_participants)
+            patch = _normalize_change_fields(
+                {
+                    "nodes": self._plan_node_payloads(nodes),
+                    "dependencies": self._plan_dependency_payloads(dependencies),
+                    "node_participants": self._plan_participant_payloads(
+                        nodes,
+                        node_participants,
+                    ),
+                }
+            )
+            candidate = self._candidate_snapshot(uow, task, patch)
+            self._validate_candidate(uow, task, patch, candidate)
+            now = _aware_utc(self._clock(), "clock")
+            self._apply_task_plan(uow, task, nodes, dependencies, node_participants)
+            _increment_task(task, now)
+            _append_log(
+                uow,
+                task,
+                from_status=TASK_IN_PROGRESS,
+                to_status=TASK_IN_PROGRESS,
+                action_type="task_plan_confirmed",
+                operator_employee_no=actor_employee_no,
+                operation_source=normalized_source,
+                now=now,
+            )
+            uow.commit()
+            return task
+
     def submit_for_confirmation(
         self,
         task_id: UUID,
@@ -1782,9 +1848,7 @@ class TaskWorkflowService:
             _require_state(task, TASK_DRAFT)
             _require_actor(actor_employee_no, task.creator_employee_no, "creator")
             _primary_assignee_participant(uow, task)
-            nodes = _validate_existing_graph(uow, task.task_id)
-            if not nodes:
-                raise BusinessValidationError("task must have at least one node")
+            _validate_existing_graph(uow, task.task_id)
             now = _aware_utc(self._clock(), "clock")
             task.status = TASK_PENDING_CONFIRMATION
             _increment_task(task, now)
@@ -2279,3 +2343,274 @@ class TaskWorkflowService:
                 raise BusinessValidationError("planned deadline must not precede planned start")
             node_by_id[node.node_id] = node
         return node_by_id
+
+    @staticmethod
+    def _validate_plan_nodes(
+        nodes: Sequence[TaskNodeDraft],
+    ) -> dict[UUID, TaskNodeDraft]:
+        node_by_id: dict[UUID, TaskNodeDraft] = {}
+        node_orders: set[int] = set()
+        for node in nodes:
+            if node.node_id in node_by_id:
+                raise BusinessValidationError("duplicate node_id")
+            if node.node_order < 1 or node.node_order in node_orders:
+                raise BusinessValidationError("node_order must be positive and unique")
+            node_orders.add(node.node_order)
+            _required_text(node.node_name, "node_name")
+            if not node.owner_employee_no or not node.owner_employee_no.strip():
+                raise BusinessValidationError("node owner is required")
+            if node.planned_deadline is None:
+                raise BusinessValidationError("node planned_deadline is required")
+            for field_name, value in (
+                ("estimated_hours", node.estimated_hours),
+                ("actual_hours", node.actual_hours),
+            ):
+                if value is not None and value < Decimal(0):
+                    raise BusinessValidationError(f"node {field_name} must not be negative")
+            start = _optional_utc(node.planned_start_time, "planned_start_time")
+            deadline = _optional_utc(node.planned_deadline, "planned_deadline")
+            if start is not None and deadline < start:
+                raise BusinessValidationError("planned deadline must not precede planned start")
+            node_by_id[node.node_id] = node
+        return node_by_id
+
+    @staticmethod
+    def _validate_plan_deadlines(
+        task: Task,
+        node_by_id: Mapping[UUID, TaskNodeDraft],
+        dependencies: Sequence[TaskNodeDependencyDraft],
+    ) -> None:
+        task_deadline = _optional_utc(task.deadline, "deadline")
+        if task_deadline is None:
+            raise BusinessValidationError("task deadline is required before task planning")
+        deadlines: dict[UUID, datetime] = {}
+        for node_id, node in node_by_id.items():
+            node_deadline = _optional_utc(node.planned_deadline, "planned_deadline")
+            if node_deadline is None:
+                raise BusinessValidationError("node planned_deadline is required")
+            if node_deadline > task_deadline:
+                raise BusinessValidationError("node planned_deadline must not exceed task deadline")
+            deadlines[node_id] = node_deadline
+        for dependency in dependencies:
+            predecessor_deadline = deadlines[dependency.predecessor_node_id]
+            successor_deadline = deadlines[dependency.successor_node_id]
+            if predecessor_deadline > successor_deadline:
+                raise BusinessValidationError(
+                    "dependency predecessor deadline must not exceed successor deadline"
+                )
+
+    def _validate_plan_people(
+        self,
+        uow: UnitOfWork,
+        task: Task,
+        actor_employee_no: str,
+        nodes: Sequence[TaskNodeDraft],
+        node_participants: Sequence[TaskNodeParticipantDraft],
+    ) -> None:
+        task_participants = uow.tasks.list_participants(task.task_id)
+        task_people = {
+            task.creator_employee_no,
+            task.main_assignee_employee_no,
+            task.report_to_employee_no,
+            task.reviewer_employee_no,
+            *(participant.employee_no for participant in task_participants),
+        } - {None}
+        for employee_no in {
+            *(node.owner_employee_no for node in nodes if node.owner_employee_no),
+            *(participant.employee_no for participant in node_participants),
+        }:
+            self._require_user(uow, employee_no)
+            if employee_no in task_people:
+                continue
+            if not self._can_assign_employee(uow, actor_employee_no, employee_no):
+                raise PermissionDeniedError("actor cannot assign this node owner")
+
+    def _can_assign_employee(
+        self,
+        uow: UnitOfWork,
+        actor_employee_no: str,
+        target_employee_no: str,
+    ) -> bool:
+        session = getattr(uow, "session", None)
+        if session is None:
+            return False
+        try:
+            from app.services.business_capabilities import PermissionScopeService
+        except ImportError:
+            return False
+        return PermissionScopeService(session, clock=self._clock).can_assign_employee(
+            actor_employee_no,
+            target_employee_no,
+        )
+
+    @staticmethod
+    def _plan_node_payloads(nodes: Sequence[TaskNodeDraft]) -> list[dict[str, object]]:
+        return [
+            {
+                "node_id": str(node.node_id),
+                "node_order": node.node_order,
+                "sort_weight": node.sort_weight,
+                "node_name": node.node_name,
+                "action_detail": node.action_detail,
+                "tools_or_materials": node.tools_or_materials,
+                "owner_employee_no": node.owner_employee_no,
+                "planned_start_time": (
+                    node.planned_start_time.isoformat() if node.planned_start_time else None
+                ),
+                "planned_deadline": (
+                    node.planned_deadline.isoformat() if node.planned_deadline else None
+                ),
+                "estimated_hours": str(node.estimated_hours)
+                if node.estimated_hours is not None
+                else None,
+                "actual_hours": str(node.actual_hours) if node.actual_hours is not None else None,
+                "deliverable": node.deliverable,
+                "acceptance_criteria": node.acceptance_criteria,
+                "progress_percent": 0,
+                "status": "pending",
+                "completed_at": None,
+            }
+            for node in nodes
+        ]
+
+    @staticmethod
+    def _plan_dependency_payloads(
+        dependencies: Sequence[TaskNodeDependencyDraft],
+    ) -> list[dict[str, object]]:
+        return [
+            {
+                "dependency_id": str(dependency.dependency_id),
+                "predecessor_node_id": str(dependency.predecessor_node_id),
+                "successor_node_id": str(dependency.successor_node_id),
+                "dependency_type": dependency.dependency_type,
+            }
+            for dependency in dependencies
+        ]
+
+    @staticmethod
+    def _plan_participant_payloads(
+        nodes: Sequence[TaskNodeDraft],
+        node_participants: Sequence[TaskNodeParticipantDraft],
+    ) -> list[dict[str, object]]:
+        values: list[dict[str, object]] = []
+        seen: set[tuple[UUID, str, str]] = set()
+        for node in nodes:
+            if node.owner_employee_no is None:
+                continue
+            key = (node.node_id, node.owner_employee_no, "owner")
+            seen.add(key)
+            values.append(
+                {
+                    "node_participant_id": str(uuid4()),
+                    "node_id": str(node.node_id),
+                    "employee_no": node.owner_employee_no,
+                    "participant_role": "owner",
+                }
+            )
+        for participant in node_participants:
+            key = (
+                participant.node_id,
+                participant.employee_no,
+                participant.participant_role,
+            )
+            if key in seen:
+                continue
+            seen.add(key)
+            values.append(
+                {
+                    "node_participant_id": str(uuid4()),
+                    "node_id": str(participant.node_id),
+                    "employee_no": participant.employee_no,
+                    "participant_role": participant.participant_role,
+                }
+            )
+        return values
+
+    @staticmethod
+    def _apply_task_plan(
+        uow: UnitOfWork,
+        task: Task,
+        nodes: Sequence[TaskNodeDraft],
+        dependencies: Sequence[TaskNodeDependencyDraft],
+        node_participants: Sequence[TaskNodeParticipantDraft],
+    ) -> None:
+        repository = uow.task_nodes
+        for dependency in repository.list_dependencies(task.task_id):
+            repository.delete_dependency(dependency)
+        list_node_participants = getattr(repository, "list_participants_by_task_id", None)
+        if list_node_participants is not None:
+            for participant in list_node_participants(task.task_id):
+                repository.delete_participant(participant)
+        current = {node.node_id: node for node in repository.list_nodes(task.task_id)}
+        desired_ids = {node.node_id for node in nodes}
+        for node_id, existing in current.items():
+            if node_id not in desired_ids:
+                repository.delete_node(existing)
+        session = getattr(uow, "session", None)
+        if session is not None:
+            session.flush()
+
+        for node in nodes:
+            existing = current.get(node.node_id)
+            values = {
+                "node_order": node.node_order,
+                "sort_weight": node.sort_weight,
+                "node_name": node.node_name.strip(),
+                "action_detail": node.action_detail,
+                "tools_or_materials": node.tools_or_materials,
+                "owner_employee_no": node.owner_employee_no,
+                "planned_start_time": _optional_utc(
+                    node.planned_start_time,
+                    "planned_start_time",
+                ),
+                "planned_deadline": _optional_utc(
+                    node.planned_deadline,
+                    "planned_deadline",
+                ),
+                "estimated_hours": node.estimated_hours,
+                "actual_hours": node.actual_hours,
+                "deliverable": node.deliverable,
+                "acceptance_criteria": node.acceptance_criteria,
+                "progress_percent": 0,
+                "status": "pending",
+                "completed_at": None,
+            }
+            if existing is None:
+                repository.add_node(
+                    TaskNode(
+                        task_id=task.task_id,
+                        node_id=node.node_id,
+                        **values,
+                    )
+                )
+            else:
+                for key, value in values.items():
+                    setattr(existing, key, value)
+
+        participants = TaskWorkflowService._plan_participant_payloads(
+            nodes,
+            node_participants,
+        )
+        for participant in participants:
+            repository.add_participant(
+                TaskNodeParticipant(
+                    task_id=task.task_id,
+                    node_participant_id=_uuid_value(
+                        participant["node_participant_id"],
+                        "node_participant_id",
+                    ),
+                    node_id=_uuid_value(participant["node_id"], "node_id"),
+                    employee_no=str(participant["employee_no"]),
+                    participant_role=str(participant["participant_role"]),
+                )
+            )
+        for dependency in dependencies:
+            repository.add_dependency(
+                TaskNodeDependency(
+                    dependency_id=dependency.dependency_id,
+                    task_id=task.task_id,
+                    predecessor_node_id=dependency.predecessor_node_id,
+                    successor_node_id=dependency.successor_node_id,
+                    dependency_type=dependency.dependency_type,
+                )
+            )

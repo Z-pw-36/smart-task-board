@@ -49,6 +49,11 @@ from app.services.business_capabilities import (
     SystemParameterService,
     TaskIntakeService,
 )
+from app.services.commands import (
+    TaskNodeDependencyDraft,
+    TaskNodeDraft,
+    TaskNodeParticipantDraft,
+)
 from app.services.task_workflow import TaskWorkflowService
 
 pytestmark = pytest.mark.postgresql
@@ -387,6 +392,38 @@ def test_full_business_capability_flow_with_real_postgresql(
         task.task_id, refs.creator, task.task_version, "postgresql-test"
     )
     task = workflow.accept_task(task.task_id, refs.assignee, task.task_version, "postgresql-test")
+    first_node_id = uuid4()
+    second_node_id = uuid4()
+    task = workflow.confirm_task_plan(
+        task.task_id,
+        refs.assignee,
+        task.task_version,
+        "postgresql-test",
+        (
+            TaskNodeDraft(
+                first_node_id,
+                1,
+                "Prepare dashboard scope",
+                owner_employee_no=refs.assignee,
+                planned_deadline=datetime(2026, 8, 21, 12, 0, tzinfo=UTC),
+                estimated_hours=Decimal("8"),
+                deliverable="Scope checklist",
+                acceptance_criteria="Scope is confirmed",
+            ),
+            TaskNodeDraft(
+                second_node_id,
+                2,
+                "Build KPI dashboard",
+                owner_employee_no=refs.assignee,
+                planned_deadline=datetime(2026, 8, 22, 8, 0, tzinfo=UTC),
+                estimated_hours=Decimal("12"),
+                deliverable="Revenue dashboard",
+                acceptance_criteria="KPI is measurable",
+            ),
+        ),
+        (TaskNodeDependencyDraft(first_node_id, second_node_id),),
+        (TaskNodeParticipantDraft(second_node_id, refs.reviewer, "reviewer"),),
+    )
     _, change_request = workflow.submit_change_request(
         task.task_id,
         refs.assignee,

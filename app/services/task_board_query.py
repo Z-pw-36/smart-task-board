@@ -71,7 +71,7 @@ def _task_actions(
 ) -> list[str]:
     actions: list[str] = []
     if task.status == "draft" and actor == task.creator_employee_no:
-        if task.main_assignee_employee_no is not None and nodes:
+        if task.main_assignee_employee_no is not None:
             actions.append("submit_for_confirmation")
     elif task.status == "pending_confirmation" and actor == task.creator_employee_no:
         if task.main_assignee_employee_no == actor:
@@ -89,6 +89,8 @@ def _task_actions(
             or is_task_participant
         )
         actions = ["submit_progress_report"] if is_main_assignee else []
+        if is_main_assignee and not nodes:
+            actions.insert(0, "plan_task")
         if can_report_issue:
             actions.append("report_task_issue")
         if (
@@ -398,6 +400,16 @@ class TaskBoardQueryService:
                         )
                     )
             elif task.status == "in_progress":
+                if "plan_task" in task_actions:
+                    items.append(
+                        self._inbox_item(
+                            "plan_task",
+                            task,
+                            task_summary,
+                            None,
+                            ["plan_task"],
+                        )
+                    )
                 if "submit_completion" in task_actions:
                     items.append(
                         self._inbox_item(
@@ -881,6 +893,7 @@ class TaskBoardQueryService:
             "confirm_task": allowed_actions[0].replace("_", "-"),
             "accept_task": "accept",
             "handle_returned_task": "resend",
+            "plan_task": "planning",
             "start_node": "start",
             "update_node": "progress",
             "complete_node": "complete",
@@ -888,7 +901,9 @@ class TaskBoardQueryService:
             "approve_completion": "approve-completion",
             "reopen_node": "reopen",
         }[action_code]
-        if action_code == "update_node":
+        if action_code == "plan_task":
+            endpoint += "/planning"
+        elif action_code == "update_node":
             endpoint += "/progress"
         else:
             endpoint += f"/actions/{action_suffix}"
@@ -896,6 +911,7 @@ class TaskBoardQueryService:
             "confirm_task": "Task is waiting for creator confirmation.",
             "accept_task": "Task is waiting for the main assignee.",
             "handle_returned_task": "Returned task is waiting to be resent.",
+            "plan_task": "Accepted task is waiting for execution planning.",
             "start_node": "Task node is ready to start.",
             "update_node": "Task node is in progress.",
             "complete_node": "Task node can be completed.",

@@ -2,8 +2,8 @@ import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { Navigate, useNavigate } from "react-router-dom";
 
-import { ApiError, apiRequest } from "../api/client";
-import type { PrototypeUser } from "../api/types";
+import { ApiError } from "../api/client";
+import { listPrototypeUsers } from "../api/endpoints";
 import { useAuth } from "../auth/useAuth";
 import { EmptyState, ErrorState, LoadingState } from "../components/Feedback";
 
@@ -15,7 +15,7 @@ export function LoginPage() {
   const [loginError, setLoginError] = useState<unknown>(null);
   const users = useQuery({
     queryKey: ["prototype-users"],
-    queryFn: () => apiRequest<PrototypeUser[]>("/api/v1/auth/prototype-users", {}, { anonymous: true }),
+    queryFn: listPrototypeUsers,
     retry: false,
   });
   const loginErrorMessage =
