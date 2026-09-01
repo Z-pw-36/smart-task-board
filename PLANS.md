@@ -1,5 +1,9 @@
 # SmartTaskBoard Delivery Plan
 
+> Historical / Pre-V1.1 evidence: this file records the pre-V1.1 delivery plan and must not be
+> read as proof that SmartTaskBoard V1.1 requirements are complete. The active V1.1 source of truth
+> is `docs/DEVELOPMENT_PLAN_V1.1.md` plus the PRD/reference materials under `docs/reference/`.
+
 This plan tracks execution of `提示词文件.md`. The master specification and verified repository
 state take precedence if this summary becomes stale.
 

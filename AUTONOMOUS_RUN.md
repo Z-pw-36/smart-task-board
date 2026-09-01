@@ -1,5 +1,9 @@
 # SmartTaskBoard Autonomous Run
 
+> Historical / Pre-V1.1 evidence: this run log predates the V1.1 execution plan and is retained as
+> baseline evidence only. Its wave status and next action are superseded by
+> `docs/DEVELOPMENT_PLAN_V1.1.md`.
+
 ## Current state
 
 - Current milestone: Batch 2B accepted; Wave 1 is next.

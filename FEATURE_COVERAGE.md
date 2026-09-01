@@ -1,5 +1,9 @@
 # SmartTaskBoard Backend Feature Coverage
 
+> Historical / Pre-V1.1 evidence: the completion statements below describe the pre-V1.1 backend
+> baseline only. They do not mean V1.1 lifecycle, AI decomposition, route, API, or frontend
+> requirements are complete. Use `docs/DEV_00_BASELINE_REPORT.md` for the current V1.1 gap map.
+
 Snapshot date: 2026-08-21.
 
 Backend FEATURE_COVERAGE = 10 / 10 COMPLETE
