@@ -1,0 +1,87 @@
+/**
+ * Feature: V1.1 mobile design tokens.
+ * Responsibilities: expose the second-version HTML visual language as reusable CSS variables.
+ * Does not own: page layout routing, business status mapping, or data fetching.
+ * Plan task: DEV-01.
+ */
+
+:root {
+  --stb-color-blue: #1769ff;
+  --stb-color-blue-2: #4b8cff;
+  --stb-color-navy: #071d3d;
+  --stb-color-teal: #08a99a;
+  --stb-color-red: #ff4358;
+  --stb-color-orange: #ff9718;
+  --stb-color-amber: #ffad14;
+  --stb-color-ink: #11203a;
+  --stb-color-muted: #72809a;
+  --stb-color-line: #e7edf6;
+  --stb-color-bg: #f4f7fc;
+  --stb-color-page-bg: #eaf0f8;
+  --stb-color-surface: #ffffff;
+  --stb-color-surface-soft: #f7f9fc;
+  --stb-color-focus: rgba(23, 105, 255, 0.22);
+  --stb-color-backdrop: rgba(6, 18, 37, 0.45);
+
+  --stb-status-info-bg: #eaf1ff;
+  --stb-status-info-fg: var(--stb-color-blue);
+  --stb-status-success-bg: #e5f8f3;
+  --stb-status-success-fg: #008c7f;
+  --stb-status-warning-bg: #fff2df;
+  --stb-status-warning-fg: #f27d00;
+  --stb-status-danger-bg: #ffeaed;
+  --stb-status-danger-fg: #e93047;
+  --stb-status-neutral-bg: #f0f3f7;
+  --stb-status-neutral-fg: #6e7b91;
+
+  --stb-font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --stb-font-size-caption: 11px;
+  --stb-font-size-secondary: 12px;
+  --stb-font-size-body: 14px;
+  --stb-font-size-card-title: 16px;
+  --stb-font-size-section-title: 16px;
+  --stb-font-size-page-title: 21px;
+  --stb-font-size-metric: 25px;
+  --stb-font-weight-regular: 400;
+  --stb-font-weight-medium: 600;
+  --stb-font-weight-bold: 700;
+  --stb-font-weight-heavy: 800;
+  --stb-line-height-tight: 1.15;
+  --stb-line-height-body: 1.55;
+
+  --stb-space-1: 4px;
+  --stb-space-2: 6px;
+  --stb-space-3: 8px;
+  --stb-space-4: 10px;
+  --stb-space-5: 12px;
+  --stb-space-6: 14px;
+  --stb-space-7: 16px;
+  --stb-space-8: 18px;
+  --stb-space-9: 20px;
+  --stb-space-10: 24px;
+
+  --stb-radius-sm: 9px;
+  --stb-radius-md: 11px;
+  --stb-radius-lg: 13px;
+  --stb-radius-card: 18px;
+  --stb-radius-sheet: 24px 24px 0 0;
+  --stb-radius-pill: 999px;
+
+  --stb-shadow-card: 0 6px 22px rgba(31, 71, 126, 0.055);
+  --stb-shadow-float: 0 10px 30px rgba(28, 65, 121, 0.09);
+  --stb-shadow-shell: 0 0 45px rgba(20, 46, 84, 0.13);
+
+  --stb-z-bottom-nav: 20;
+  --stb-z-overlay: 50;
+  --stb-z-toast: 80;
+
+  --stb-touch-target: 44px;
+  --stb-mobile-max-width: 500px;
+  --stb-safe-bottom: env(safe-area-inset-bottom, 0px);
+  --stb-safe-left: env(safe-area-inset-left, 0px);
+  --stb-safe-right: env(safe-area-inset-right, 0px);
+}
+
+body {
+  font-family: var(--stb-font-family);
+}

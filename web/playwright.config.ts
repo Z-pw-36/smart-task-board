@@ -1,6 +1,7 @@
-import { defineConfig, devices } from "@playwright/test";
+import { defineConfig } from "@playwright/test";
 
 const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? "http://127.0.0.1:5173";
+const skipWebServer = process.env.PLAYWRIGHT_SKIP_WEBSERVER === "true";
 
 export default defineConfig({
   testDir: "./e2e",
@@ -11,7 +12,7 @@ export default defineConfig({
     baseURL,
     trace: "retain-on-failure",
   },
-  webServer: {
+  webServer: skipWebServer ? undefined : {
     command: "npm run dev -- --host 127.0.0.1",
     url: baseURL,
     reuseExistingServer: !process.env.CI,
@@ -20,15 +21,15 @@ export default defineConfig({
   projects: [
     {
       name: "mobile-375",
-      use: { ...devices["iPhone SE"], viewport: { width: 375, height: 812 } },
+      use: { browserName: "chromium", isMobile: true, viewport: { width: 375, height: 812 } },
     },
     {
       name: "mobile-390",
-      use: { ...devices["iPhone 12"], viewport: { width: 390, height: 844 } },
+      use: { browserName: "chromium", isMobile: true, viewport: { width: 390, height: 844 } },
     },
     {
       name: "mobile-430",
-      use: { ...devices["Pixel 7"], viewport: { width: 430, height: 932 } },
+      use: { browserName: "chromium", isMobile: true, viewport: { width: 430, height: 932 } },
     },
   ],
 });

@@ -937,7 +937,7 @@ python -m alembic upgrade head
 | 任务 | 状态 | 实际变更 | 最小测试 | 受影响回归 | 完成日期 | 阻塞/遗留 |
 |---|---|---|---|---|---|---|
 | DEV-00 | TODO | — | — | — | — | — |
-| DEV-01 | TODO | — | — | — | — | — |
+| DEV-01 | DONE | `web/src/styles/` tokens; `web/src/shared/components/` primitives; DEV-01 Playwright visual baseline | Vitest shared component tests 6 passed; Playwright DEV-01 3 passed | Frontend 43 passed; build/lint passed; backend pytest 345 passed/21 skipped; ruff/pip check passed | 2026-09-01 | No business API, employee data, backend code, route shell, or DEV-02+ work |
 | DEV-02 | TODO | — | — | — | — | — |
 | DEV-03 | TODO | — | — | — | — | — |
 | DEV-04 | TODO | — | — | — | — | — |
