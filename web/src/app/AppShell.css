@@ -30,17 +30,6 @@
   position: relative;
 }
 
-.stb-route-shell__bell-dot {
-  position: absolute;
-  top: 9px;
-  right: 9px;
-  width: 8px;
-  height: 8px;
-  border: 2px solid #ffffff;
-  border-radius: 50%;
-  background: var(--stb-color-red);
-}
-
 .stb-route-shell__nav-icon {
   display: inline-grid;
   place-items: center;

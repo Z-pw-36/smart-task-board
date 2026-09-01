@@ -1,0 +1,289 @@
+/**
+ * Feature: V1.1 Workbench page styles.
+ * Responsibilities: style the second-version Workbench feature inside the DEV-02 mobile shell.
+ * Does not own: shared tokens, router layout, or non-Workbench page styles.
+ * Plan task: DEV-03.
+ */
+
+.stb-workbench {
+  display: grid;
+  gap: var(--stb-space-5);
+}
+
+.stb-workbench--loading {
+  padding-top: var(--stb-space-1);
+}
+
+.stb-workbench-hero,
+.stb-workbench-ai {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--stb-space-5);
+  border-radius: var(--stb-radius-card);
+  padding: var(--stb-space-7);
+  color: #ffffff;
+  background: linear-gradient(135deg, var(--stb-color-blue), var(--stb-color-teal));
+  box-shadow: var(--stb-shadow-card);
+}
+
+.stb-workbench-hero .stb-text-caption,
+.stb-workbench-hero .stb-text-secondary,
+.stb-workbench-ai .stb-text-secondary {
+  color: rgba(255, 255, 255, 0.82);
+}
+
+.stb-workbench-icon-link {
+  position: relative;
+  display: inline-grid;
+  flex: 0 0 auto;
+  width: var(--stb-touch-target);
+  height: var(--stb-touch-target);
+  place-items: center;
+  border-radius: var(--stb-radius-lg);
+  background: rgba(255, 255, 255, 0.18);
+  color: #ffffff;
+  font-weight: var(--stb-font-weight-heavy);
+}
+
+.stb-workbench-dot {
+  position: absolute;
+  top: 9px;
+  right: 9px;
+  width: 8px;
+  height: 8px;
+  border: 2px solid #ffffff;
+  border-radius: 50%;
+  background: var(--stb-color-red);
+}
+
+.stb-workbench-section {
+  display: grid;
+  gap: var(--stb-space-5);
+}
+
+.stb-workbench-section__head {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--stb-space-3);
+}
+
+.stb-workbench-metrics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--stb-space-4);
+}
+
+.stb-workbench-metric,
+.stb-workbench-quadrant,
+.stb-workbench-task,
+.stb-workbench-executive {
+  min-height: var(--stb-touch-target);
+  border: 1px solid rgba(225, 233, 244, 0.9);
+  border-radius: var(--stb-radius-card);
+  background: var(--stb-color-surface);
+  box-shadow: var(--stb-shadow-card);
+  color: var(--stb-color-ink);
+  text-align: left;
+}
+
+.stb-workbench-metric {
+  display: grid;
+  gap: var(--stb-space-2);
+  padding: var(--stb-space-6);
+  cursor: pointer;
+}
+
+.stb-workbench-metric span,
+.stb-workbench-task__head,
+.stb-workbench-task__meta {
+  color: var(--stb-color-muted);
+  font-size: var(--stb-font-size-secondary);
+}
+
+.stb-workbench-metric strong {
+  font-size: var(--stb-font-size-metric);
+  line-height: var(--stb-line-height-tight);
+}
+
+.stb-workbench-metric--active,
+.stb-workbench-quadrant--active {
+  border-color: var(--stb-color-blue);
+  box-shadow: 0 0 0 3px var(--stb-color-focus);
+}
+
+.stb-workbench-quadrants {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--stb-space-4);
+}
+
+.stb-workbench-quadrant {
+  display: flex;
+  min-height: 76px;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--stb-space-3);
+  padding: var(--stb-space-6);
+  cursor: pointer;
+}
+
+.stb-workbench-quadrant span {
+  min-width: 0;
+  font-weight: var(--stb-font-weight-bold);
+  overflow-wrap: anywhere;
+}
+
+.stb-workbench-quadrant strong {
+  flex: 0 0 auto;
+  font-size: 22px;
+}
+
+.stb-workbench-quadrant--important_urgent {
+  background: #fff5f6;
+}
+
+.stb-workbench-quadrant--important_not_urgent {
+  background: #fff8eb;
+}
+
+.stb-workbench-quadrant--urgent_not_important {
+  background: #edf7ff;
+}
+
+.stb-workbench-quadrant--routine {
+  background: #eefaf7;
+}
+
+.stb-workbench-support__body {
+  display: grid;
+  gap: var(--stb-space-5);
+}
+
+.stb-workbench-support__numbers {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--stb-space-3);
+}
+
+.stb-workbench-support__numbers span {
+  display: grid;
+  min-height: 58px;
+  place-items: center;
+  border-radius: var(--stb-radius-md);
+  background: var(--stb-color-surface-soft);
+  color: var(--stb-color-muted);
+  font-size: var(--stb-font-size-caption);
+}
+
+.stb-workbench-support__numbers strong {
+  color: var(--stb-color-ink);
+  font-size: 20px;
+}
+
+.stb-workbench-row-link,
+.stb-workbench-inline-link,
+.stb-workbench-primary-link,
+.stb-workbench-voice-link,
+.stb-workbench-executive {
+  display: inline-flex;
+  min-height: var(--stb-touch-target);
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--stb-radius-lg);
+  font-weight: var(--stb-font-weight-heavy);
+}
+
+.stb-workbench-row-link {
+  width: 100%;
+  margin-top: var(--stb-space-5);
+  color: var(--stb-color-blue);
+  background: var(--stb-status-info-bg);
+}
+
+.stb-workbench-inline-link {
+  flex: 0 0 auto;
+  padding: 0 var(--stb-space-3);
+  color: var(--stb-color-blue);
+}
+
+.stb-workbench-ai__actions {
+  display: grid;
+  flex: 0 0 auto;
+  gap: var(--stb-space-3);
+}
+
+.stb-workbench-primary-link,
+.stb-workbench-voice-link {
+  min-width: 88px;
+  padding: 0 var(--stb-space-5);
+}
+
+.stb-workbench-primary-link {
+  color: var(--stb-color-blue);
+  background: #ffffff;
+}
+
+.stb-workbench-voice-link {
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.stb-workbench-executive {
+  width: 100%;
+  justify-content: space-between;
+  padding: 0 var(--stb-space-6);
+  color: var(--stb-color-blue);
+}
+
+.stb-workbench-executive::after {
+  content: ">";
+}
+
+.stb-workbench-task-list {
+  display: grid;
+  gap: var(--stb-space-4);
+}
+
+.stb-workbench-task {
+  display: grid;
+  gap: var(--stb-space-4);
+  padding: var(--stb-space-6);
+}
+
+.stb-workbench-task strong {
+  overflow-wrap: anywhere;
+}
+
+.stb-workbench-task__head,
+.stb-workbench-task__meta {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--stb-space-3);
+}
+
+.stb-workbench-task__meta {
+  flex-wrap: wrap;
+}
+
+:where(.stb-workbench a, .stb-workbench button):focus-visible {
+  outline: 3px solid var(--stb-color-focus);
+  outline-offset: 2px;
+}
+
+@media (max-width: 390px) {
+  .stb-workbench-hero,
+  .stb-workbench-ai {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .stb-workbench-ai__actions {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

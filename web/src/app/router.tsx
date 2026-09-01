@@ -8,6 +8,7 @@
 import { Navigate, Outlet, Route, Routes, useLocation, useParams } from "react-router-dom";
 
 import { useAuth } from "../auth/useAuth";
+import { WorkbenchPage } from "../features/workbench";
 import { AppShell, RouteLoadingState } from "./AppShell";
 import { canAccessExecutiveRoutes } from "./navigation";
 import { createReturnSource } from "./return-state";
@@ -49,7 +50,7 @@ export function AppRoutes() {
       <Route path="/login" element={<LoginRoute />} />
       <Route path="/" element={<Navigate to="/workbench" replace />} />
       <Route element={<ProtectedLayout />}>
-        <Route path="/workbench" element={<RoutePlaceholder />} />
+        <Route path="/workbench" element={<WorkbenchPage />} />
         <Route element={<ExecutiveBoundary />}>
           <Route path="/executive" element={<RoutePlaceholder />} />
           <Route path="/executive/employee-tasks" element={<RoutePlaceholder />} />

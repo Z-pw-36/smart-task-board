@@ -7,11 +7,13 @@
 
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, useLocation } from "react-router-dom";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { CurrentUser } from "../api/types";
 import { AuthContext, type AuthValue } from "../auth/auth-context";
+import { jsonResponse, taskSummary } from "../test/test-utils";
 import { AppRoutes } from "./router";
 
 const employeeUser: CurrentUser = {
@@ -43,6 +45,7 @@ function renderRoutes({
   user?: CurrentUser | null;
   state?: unknown;
 }) {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   const auth: AuthValue = {
     user,
     loading: false,
@@ -51,17 +54,18 @@ function renderRoutes({
   };
 
   return render(
-    <AuthContext.Provider value={auth}>
-      <MemoryRouter initialEntries={[{ pathname: route, state }]}>
-        <AppRoutes />
-        <LocationProbe />
-      </MemoryRouter>
-    </AuthContext.Provider>,
+    <QueryClientProvider client={queryClient}>
+      <AuthContext.Provider value={auth}>
+        <MemoryRouter initialEntries={[{ pathname: route, state }]}>
+          <AppRoutes />
+          <LocationProbe />
+        </MemoryRouter>
+      </AuthContext.Provider>
+    </QueryClientProvider>,
   );
 }
 
 const ordinaryTargetRoutes = [
-  ["/workbench", "工作台"],
   ["/tasks", "任务概览"],
   ["/task/DEV02-TASK-001", "任务详情"],
   ["/task/DEV02-TASK-001/report", "提交进度汇报"],
@@ -73,12 +77,55 @@ const ordinaryTargetRoutes = [
   ["/profile", "我的"],
 ] as const;
 
+function mockWorkbenchFetch() {
+  vi.stubGlobal("fetch", vi.fn(async (url: string | URL | Request) => {
+    const value = String(url);
+    if (value.includes("/dashboard/summary")) {
+      return jsonResponse({
+        created_task_count: 1,
+        assigned_task_count: 1,
+        inbox_count: 1,
+        in_progress_count: 1,
+        pending_acceptance_count: 0,
+        today_task_count: 0,
+        due_within_7_days_count: 0,
+        overdue_count: 0,
+        report_due_count: 0,
+        open_issue_count: 0,
+        blocked_task_count: 0,
+        completion_review_count: 0,
+        unread_notification_count: 0,
+        open_conflict_count: 0,
+        due_window_days: 7,
+        recent_tasks: [],
+        latest_workload: null,
+        priority_items: [],
+      });
+    }
+    if (value.includes("/tasks")) return jsonResponse({ items: [taskSummary], limit: 8, offset: 0, total: 1 });
+    return jsonResponse({}, 404);
+  }));
+}
+
 describe("DEV-02 target router", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   it("allows the login route to render for anonymous users", () => {
     renderRoutes({ route: "/login", user: null });
 
     expect(screen.getByRole("heading", { name: "登录" })).toBeInTheDocument();
     expect(screen.queryByTestId("app-shell")).not.toBeInTheDocument();
+  });
+
+  it("recognizes /workbench and renders the Workbench feature inside the protected shell", async () => {
+    mockWorkbenchFetch();
+    renderRoutes({ route: "/workbench" });
+
+    expect(screen.getByTestId("app-shell")).toBeInTheDocument();
+    expect(await screen.findByTestId("workbench-page")).toBeInTheDocument();
+    expect(screen.getByText("AI 任务助手")).toBeInTheDocument();
   });
 
   it.each(ordinaryTargetRoutes)("recognizes %s and renders the protected shell", (route, title) => {
@@ -131,6 +178,7 @@ describe("DEV-02 target router", () => {
   });
 
   it("redirects legacy root to workbench without a loop", async () => {
+    mockWorkbenchFetch();
     renderRoutes({ route: "/" });
 
     await waitFor(() => expect(screen.getByTestId("location")).toHaveTextContent("/workbench"));

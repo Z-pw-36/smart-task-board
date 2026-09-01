@@ -58,7 +58,6 @@ export function AppShell() {
             onClick={() => navigate("/notifications", { state: { source: createReturnSource(location) } })}
           >
             <span aria-hidden="true">N</span>
-            <span className="stb-route-shell__bell-dot" aria-hidden="true" />
           </Button>
         }
       />

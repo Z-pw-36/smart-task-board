@@ -939,7 +939,7 @@ python -m alembic upgrade head
 | DEV-00 | TODO | — | — | — | — | — |
 | DEV-01 | DONE | `web/src/styles/` tokens; `web/src/shared/components/` primitives; DEV-01 Playwright visual baseline | Vitest shared component tests 6 passed; Playwright DEV-01 3 passed | Frontend 43 passed; build/lint passed; backend pytest 345 passed/21 skipped; ruff/pip check passed | 2026-09-01 | No business API, employee data, backend code, route shell, or DEV-02+ work |
 | DEV-02 | DONE | `web/src/app/` route shell/router/navigation/return-state/placeholders; `web/src/App.tsx`; `web/src/components/AppShell.tsx` compatibility; DEV-02 route and Playwright responsive tests | DEV-02 route tests 25 passed; Playwright DEV-02 9 passed across 375/390/430 | Frontend 68 passed; DEV-01 component tests 6 passed; Playwright full 15 passed including DEV-01 visual baseline; build/lint passed; backend pytest 345 passed/21 skipped; ruff/pip check passed | 2026-09-01 | No business API, employee data, backend code, DB migration, or DEV-03+ implementation |
-| DEV-03 | TODO | — | — | — | — | — |
+| DEV-03 | DONE | `web/src/features/workbench/` Workbench feature; `/workbench` router integration; DEV-03 Playwright responsive/performance scenario | Workbench API projection tests 6 passed; Workbench UI tests 7 passed; Playwright DEV-03 6 passed across 375/390/430 | Frontend 81 passed; DEV-02 route tests 25 passed; DEV-01 component tests 6 passed; Playwright full 21 passed; build/lint passed; backend pytest 345 passed/21 skipped; ruff/pip check passed | 2026-09-01 | Reused `/api/v1/dashboard/summary` and `/api/v1/tasks`; no backend code, DB migration, fake business API, hard-coded employee data, localStorage business write, or DEV-04+ implementation |
 | DEV-04 | TODO | — | — | — | — | — |
 | DEV-05 | TODO | — | — | — | — | — |
 | DEV-06 | TODO | — | — | — | — | — |
@@ -976,6 +976,18 @@ python -m alembic upgrade head
 - 响应式证据：Playwright `mobile-375`、`mobile-390`、`mobile-430` 均验证 AppShell、BottomNavigation、403、404；horizontal overflow <= 0；底部导航 touch target >= 44px
 - 边界结果：Business API connected = No；Hard-coded employee data = No；Backend business code modified = No；DB migration = No；DEV-03+ implemented = No
 - 遗留风险：DEV-02 仅提供路由契约占位；正式业务页面、登录/当前用户权限投影和业务 API 接入仍按 DEV-03+、DEV-06、DEV-08+ 执行
+
+### 19.4 DEV-03 完成证据
+
+- 状态：DONE
+- Baseline HEAD：`2bac9fa0cfe100dfe9d5204c1b0ff7fcdcd4c286`
+- 实际文件：`web/src/features/workbench/api.ts`、`web/src/features/workbench/hooks.ts`、`web/src/features/workbench/index.ts`、`web/src/features/workbench/WorkbenchPage.tsx`、`web/src/features/workbench/WorkbenchPage.css`、`web/src/features/workbench/__tests__/api.test.ts`、`web/src/features/workbench/__tests__/WorkbenchPage.test.tsx`、`web/e2e/dev-03-workbench.spec.ts`、`web/e2e/dev-02-routing.spec.ts`、`web/src/app/AppShell.css`、`web/src/app/AppShell.tsx`、`web/src/app/router.tsx`、`web/src/app/router.test.tsx`、`web/src/app/navigation.ts`、`docs/DEVELOPMENT_PLAN_V1.1.md`
+- API复用/新增：复用现有 `GET /api/v1/dashboard/summary`、`GET /api/v1/tasks`、`GET /api/v1/me`；未新增后端接口
+- 测试结果：`npm --prefix web run test -- --run src/features/workbench/__tests__/api.test.ts src/features/workbench/__tests__/WorkbenchPage.test.tsx` 13 passed；`npm --prefix web run test -- --run src/app/router.test.tsx` 25 passed；`npm --prefix web run test -- --run` 81 passed；`npm --prefix web run lint` passed；`npm --prefix web run build` passed；`npm exec -- playwright test` in `web/` 21 passed；`ALLOW_TEST_EMPLOYEE_HEADER=true AUTH_MODE=test_header .venv/bin/python -m pytest -q` 345 passed / 21 skipped；`.venv/bin/python -m ruff check app tests` passed；`.venv/bin/python -m pip check` passed
+- 响应式证据：Playwright `mobile-375`、`mobile-390`、`mobile-430` 均验证 Workbench、AppShell、TopBar、BottomNavigation、任务卡、403/404相关回归；horizontal overflow <= 0；Workbench 可见链接/按钮 touch target >= 44px
+- P95基线：Playwright fixture环境；每个视口5次 `/workbench` 加载样本；full run P95：375px 164ms、390px 182ms、430px 191ms
+- 边界结果：Hard-coded employee data = No；Fake business API = No；localStorage business writes = No；Backend business code modified = No；DB migration = No；DEV-04+ implemented = No
+- 遗留风险：Workbench 使用现有摘要和任务查询能力；四象限展示消费后端 `priority_items` 投影，后续 DEV-04/DEV-14 继续补齐服务端筛选和优先级口径；AI入口仅导航到创建流程，不实现 DEV-07 AI识别/语音能力
 
 ## 20. 最终完成定义（Definition of Done）
 

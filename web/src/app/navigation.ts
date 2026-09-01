@@ -40,7 +40,7 @@ export const targetRouteContracts: RouteContract[] = [
     id: "workbench",
     path: "/workbench",
     title: "工作台",
-    subtitle: "员工工作台路由占位",
+    subtitle: "摘要、任务和快捷入口",
     navId: "workbench",
     protected: true,
   },
