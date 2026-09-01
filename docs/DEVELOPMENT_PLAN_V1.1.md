@@ -938,7 +938,7 @@ python -m alembic upgrade head
 |---|---|---|---|---|---|---|
 | DEV-00 | TODO | — | — | — | — | — |
 | DEV-01 | DONE | `web/src/styles/` tokens; `web/src/shared/components/` primitives; DEV-01 Playwright visual baseline | Vitest shared component tests 6 passed; Playwright DEV-01 3 passed | Frontend 43 passed; build/lint passed; backend pytest 345 passed/21 skipped; ruff/pip check passed | 2026-09-01 | No business API, employee data, backend code, route shell, or DEV-02+ work |
-| DEV-02 | TODO | — | — | — | — | — |
+| DEV-02 | DONE | `web/src/app/` route shell/router/navigation/return-state/placeholders; `web/src/App.tsx`; `web/src/components/AppShell.tsx` compatibility; DEV-02 route and Playwright responsive tests | DEV-02 route tests 25 passed; Playwright DEV-02 9 passed across 375/390/430 | Frontend 68 passed; DEV-01 component tests 6 passed; Playwright full 15 passed including DEV-01 visual baseline; build/lint passed; backend pytest 345 passed/21 skipped; ruff/pip check passed | 2026-09-01 | No business API, employee data, backend code, DB migration, or DEV-03+ implementation |
 | DEV-03 | TODO | — | — | — | — | — |
 | DEV-04 | TODO | — | — | — | — | — |
 | DEV-05 | TODO | — | — | — | — | — |
@@ -965,6 +965,17 @@ python -m alembic upgrade head
 - `DONE`：功能、测试、文档和证据全部完成。
 
 同一时刻只能有一个任务为 `IN_PROGRESS`。
+
+### 19.3 DEV-02 完成证据
+
+- 状态：DONE
+- Baseline HEAD：`0da9ccd63044ea47cd6b5d2e2ee98935ba17a33a`
+- 实际文件：`web/src/app/AppShell.css`、`web/src/app/AppShell.tsx`、`web/src/app/RoutePlaceholders.tsx`、`web/src/app/navigation.ts`、`web/src/app/return-state.ts`、`web/src/app/router.tsx`、`web/src/app/router.test.tsx`、`web/e2e/dev-02-routing.spec.ts`、`web/src/App.tsx`、`web/src/components/AppShell.tsx`、`web/src/components/AppShell.test.tsx`、`docs/DEVELOPMENT_PLAN_V1.1.md`
+- 迁移版本：无
+- 测试结果：`npm --prefix web run test -- --run src/app/router.test.tsx` 25 passed；`npm --prefix web run test -- --run src/shared/components/__tests__/primitives.test.tsx` 6 passed；`npm --prefix web run test -- --run` 68 passed；`npm --prefix web run lint` passed；`npm --prefix web run build` passed；`npm exec -- playwright test` in `web/` 15 passed；`ALLOW_TEST_EMPLOYEE_HEADER=true AUTH_MODE=test_header .venv/bin/python -m pytest -q` 345 passed / 21 skipped；`.venv/bin/python -m ruff check app tests` passed；`.venv/bin/python -m pip check` passed
+- 响应式证据：Playwright `mobile-375`、`mobile-390`、`mobile-430` 均验证 AppShell、BottomNavigation、403、404；horizontal overflow <= 0；底部导航 touch target >= 44px
+- 边界结果：Business API connected = No；Hard-coded employee data = No；Backend business code modified = No；DB migration = No；DEV-03+ implemented = No
+- 遗留风险：DEV-02 仅提供路由契约占位；正式业务页面、登录/当前用户权限投影和业务 API 接入仍按 DEV-03+、DEV-06、DEV-08+ 执行
 
 ## 20. 最终完成定义（Definition of Done）
 

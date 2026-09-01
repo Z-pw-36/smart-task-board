@@ -1,0 +1,112 @@
+/**
+ * Feature: V1.1 application shell styles.
+ * Responsibilities: style mobile shell layout, route placeholders, and safe-area spacing.
+ * Does not own: shared primitive internals, business feature styling, or backend data states.
+ * Plan task: DEV-02.
+ */
+
+.stb-route-shell {
+  position: relative;
+  width: min(100%, var(--stb-mobile-max-width));
+  min-height: 100vh;
+  margin: 0 auto;
+  overflow-x: hidden;
+  color: var(--stb-color-ink);
+  background: var(--stb-color-bg);
+  box-shadow: var(--stb-shadow-shell);
+}
+
+.stb-route-shell__content {
+  display: grid;
+  gap: var(--stb-space-5);
+  padding: 0 var(--stb-space-7) calc(98px + var(--stb-safe-bottom));
+}
+
+.stb-route-shell__loading {
+  padding: var(--stb-space-8) var(--stb-space-7) calc(98px + var(--stb-safe-bottom));
+}
+
+.stb-route-shell__bell {
+  position: relative;
+}
+
+.stb-route-shell__bell-dot {
+  position: absolute;
+  top: 9px;
+  right: 9px;
+  width: 8px;
+  height: 8px;
+  border: 2px solid #ffffff;
+  border-radius: 50%;
+  background: var(--stb-color-red);
+}
+
+.stb-route-shell__nav-icon {
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 8px;
+  font-size: 11px;
+  font-weight: var(--stb-font-weight-heavy);
+}
+
+.stb-route-placeholder {
+  display: grid;
+  gap: var(--stb-space-5);
+}
+
+.stb-route-placeholder__facts {
+  display: grid;
+  gap: var(--stb-space-3);
+  margin: var(--stb-space-5) 0 0;
+}
+
+.stb-route-placeholder__facts div {
+  display: grid;
+  grid-template-columns: minmax(84px, 0.36fr) minmax(0, 1fr);
+  gap: var(--stb-space-4);
+  padding: var(--stb-space-3) 0;
+  border-top: 1px solid var(--stb-color-line);
+}
+
+.stb-route-placeholder__facts dt {
+  color: var(--stb-color-muted);
+}
+
+.stb-route-placeholder__facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  text-align: right;
+  font-weight: var(--stb-font-weight-bold);
+}
+
+.stb-login-shell {
+  display: grid;
+  width: min(100%, var(--stb-mobile-max-width));
+  min-height: 100vh;
+  align-items: center;
+  margin: 0 auto;
+  padding: var(--stb-space-9);
+  color: var(--stb-color-ink);
+  background: var(--stb-color-bg);
+}
+
+@media (min-width: 760px) {
+  body {
+    background: var(--stb-color-page-bg);
+  }
+
+  .stb-route-shell,
+  .stb-login-shell {
+    min-height: calc(100vh - 44px);
+    margin-top: 22px;
+    margin-bottom: 22px;
+    border-radius: 28px;
+  }
+
+  .stb-bottom-nav {
+    bottom: 22px;
+    border-radius: 0 0 28px 28px;
+  }
+}

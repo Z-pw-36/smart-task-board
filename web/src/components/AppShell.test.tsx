@@ -5,17 +5,20 @@ import { expect, it } from "vitest";
 import { renderPage } from "../test/test-utils";
 import { AppShell } from "./AppShell";
 
-it("provides both desktop and mobile semantic navigation", () => {
-  renderPage(<Routes><Route element={<AppShell />}><Route index element={<p>内容</p>} /></Route></Routes>);
+it("uses the app-layer shell and shared bottom navigation", () => {
+  renderPage(
+    <Routes>
+      <Route element={<AppShell />}>
+        <Route path="/" element={<p>内容</p>} />
+      </Route>
+    </Routes>,
+    { route: "/" },
+  );
 
-  const sidebar = screen.getByRole("complementary", { name: "主导航" });
-  const brandLink = within(sidebar).getByRole("link", { name: "SmartTaskBoard 首页" });
-  const desktopNavigation = within(sidebar).getByRole("navigation");
-  const mobileNavigation = screen.getByRole("navigation", { name: "移动端主导航" });
+  const shell = screen.getByTestId("app-shell");
+  const navigation = within(shell).getByRole("navigation", { name: "底部导航" });
 
-  expect(brandLink).toHaveAttribute("href", "/");
-  expect(within(desktopNavigation).getByRole("link", { name: /首页$/ })).toHaveAttribute("href", "/");
-  expect(within(mobileNavigation).getByRole("link", { name: /首页$/ })).toHaveAttribute("href", "/");
-  expect(within(desktopNavigation).getByRole("link", { name: /创建$/ })).toHaveAttribute("href", "/tasks/new");
-  expect(within(mobileNavigation).getByRole("link", { name: /创建$/ })).toHaveAttribute("href", "/tasks/new");
+  expect(screen.getByRole("heading", { name: "页面不存在" })).toBeInTheDocument();
+  expect(within(navigation).getByRole("button", { name: "工作台" })).toBeInTheDocument();
+  expect(within(navigation).getByRole("button", { name: "创建" })).toBeInTheDocument();
 });
