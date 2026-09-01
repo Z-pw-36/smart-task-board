@@ -55,10 +55,19 @@ def test_task_list_forwards_bounded_filters_and_actor(board_context) -> None:
         headers={"X-Employee-No": "E-ACTOR"},
         params={
             "relation": "assigned",
+            "mode": "tasks",
             "status": "in_progress",
+            "quadrant": "important_urgent",
+            "support": "open",
+            "nearDue": "true",
+            "datePreset": "custom",
             "search": "Task",
             "deadline_from": "2026-08-01",
             "deadline_to": "2026-08-31",
+            "startDate": "2026-08-01",
+            "endDate": "2026-08-31",
+            "sortBy": "updated_at",
+            "sortOrder": "desc",
             "limit": 10,
             "offset": 5,
         },
@@ -69,17 +78,65 @@ def test_task_list_forwards_bounded_filters_and_actor(board_context) -> None:
     args, kwargs = service.list_tasks.call_args
     assert args == ("E-ACTOR",)
     assert kwargs["relation"] == "assigned"
+    assert kwargs["mode"] == "tasks"
     assert kwargs["task_status"] == "in_progress"
+    assert kwargs["quadrant"] == "important_urgent"
+    assert kwargs["support"] == "open"
+    assert kwargs["near_due"] is True
+    assert kwargs["date_preset"] == "custom"
+    assert kwargs["start_date"].isoformat() == "2026-08-01"
+    assert kwargs["end_date"].isoformat() == "2026-08-31"
+    assert kwargs["sort_by"] == "updated_at"
+    assert kwargs["sort_order"] == "desc"
     assert kwargs["limit"] == 10
+    assert kwargs["offset"] == 5
+    assert kwargs["page"] == 1
+    assert kwargs["page_size"] == 10
 
 
-def test_task_list_rejects_unbounded_limit_before_service(board_context) -> None:
+@pytest.mark.parametrize(
+    "query",
+    [
+        "limit=101",
+        "pageSize=101",
+        "page=0",
+        "mode=unknown",
+        "status=unknown",
+        "quadrant=unknown",
+        "sortBy=estimated_hours",
+        "sortOrder=random",
+        "startDate=2026-08-31&endDate=2026-08-01",
+        "startDate=not-a-date",
+    ],
+)
+def test_task_list_rejects_invalid_filters_before_service(board_context, query: str) -> None:
     client, service = board_context
-    response = client.get(
-        "/api/v1/tasks?limit=101", headers={"X-Employee-No": "E-ACTOR"}
-    )
+    response = client.get(f"/api/v1/tasks?{query}", headers={"X-Employee-No": "E-ACTOR"})
     assert response.status_code == 422
     service.list_tasks.assert_not_called()
+
+
+def test_task_list_accepts_page_size_contract(board_context) -> None:
+    client, service = board_context
+    service.list_tasks.return_value = {
+        "items": [],
+        "limit": 25,
+        "offset": 25,
+        "page": 2,
+        "pageSize": 25,
+        "total": 0,
+        "status_counts": {},
+    }
+    response = client.get(
+        "/api/v1/tasks?page=2&pageSize=25", headers={"X-Employee-No": "E-ACTOR"}
+    )
+    assert response.status_code == 200
+    args, kwargs = service.list_tasks.call_args
+    assert args == ("E-ACTOR",)
+    assert kwargs["limit"] == 25
+    assert kwargs["offset"] == 25
+    assert kwargs["page"] == 2
+    assert kwargs["page_size"] == 25
 
 
 def test_inbox_returns_server_endpoint_version_and_allowed_actions(board_context) -> None:

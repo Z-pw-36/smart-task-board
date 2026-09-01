@@ -66,7 +66,6 @@ function renderRoutes({
 }
 
 const ordinaryTargetRoutes = [
-  ["/tasks", "任务概览"],
   ["/task/DEV02-TASK-001", "任务详情"],
   ["/task/DEV02-TASK-001/report", "提交进度汇报"],
   ["/task/DEV02-TASK-001/review", "任务验收"],
@@ -126,6 +125,15 @@ describe("DEV-02 target router", () => {
     expect(screen.getByTestId("app-shell")).toBeInTheDocument();
     expect(await screen.findByTestId("workbench-page")).toBeInTheDocument();
     expect(screen.getByText("AI 任务助手")).toBeInTheDocument();
+  });
+
+  it("recognizes /tasks and renders the Task Overview feature inside the protected shell", async () => {
+    mockWorkbenchFetch();
+    renderRoutes({ route: "/tasks" });
+
+    expect(screen.getByTestId("app-shell")).toBeInTheDocument();
+    expect(await screen.findByTestId("task-overview-page")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "任务信息管理" })).toBeInTheDocument();
   });
 
   it.each(ordinaryTargetRoutes)("recognizes %s and renders the protected shell", (route, title) => {

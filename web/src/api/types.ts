@@ -2,8 +2,14 @@ export type TaskStatus =
   | "draft"
   | "pending_confirmation"
   | "pending_acceptance"
+  | "pending_confirm"
+  | "pending_accept"
   | "returned"
+  | "decomposing"
+  | "decomposition_failed"
   | "in_progress"
+  | "blocked"
+  | "pending_report"
   | "pending_review"
   | "completed"
   | "archived"
@@ -101,11 +107,37 @@ export interface TaskSummary {
   updated_at: string;
 }
 
+export interface TaskOverviewNode {
+  node_id: string;
+  task_id: string;
+  task_no: string | null;
+  task_name: string;
+  node_name: string;
+  status: string;
+  task_status: TaskStatus;
+  owner: { employee_no: string; name: string } | null;
+  planned_start_time: string | null;
+  planned_deadline: string | null;
+  progress_percent: number;
+  current_user_relations: string[];
+  is_overdue: boolean;
+  days_until_deadline: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface PaginatedTasks {
   items: TaskSummary[];
   limit: number;
   offset: number;
+  page?: number;
+  pageSize?: number;
   total: number;
+  status_counts?: Record<string, number>;
+}
+
+export interface PaginatedTaskOverview extends Omit<PaginatedTasks, "items"> {
+  items: Array<TaskSummary | TaskOverviewNode>;
 }
 
 export interface InboxItem {

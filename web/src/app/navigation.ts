@@ -57,7 +57,7 @@ export const targetRouteContracts: RouteContract[] = [
     id: "tasks",
     path: "/tasks",
     title: "任务概览",
-    subtitle: "任务列表路由占位",
+    subtitle: "筛选、分页和节点模式",
     navId: "tasks",
     protected: true,
   },

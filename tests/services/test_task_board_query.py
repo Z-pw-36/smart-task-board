@@ -1,9 +1,10 @@
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 from uuid import uuid4
 
 from app.models import Task, TaskCompletionReview, TaskNode, TaskNodeDependency
+from app.services.errors import BusinessValidationError
 from app.services.task_board_query import (
     TaskBoardQueryService,
     _node_actions,
@@ -363,3 +364,128 @@ def test_dashboard_uses_bounded_real_time_counts_and_seven_day_window() -> None:
         "latest_workload": None,
         "priority_items": [],
     }
+
+
+def test_task_overview_rejects_invalid_custom_date_range() -> None:
+    service = TaskBoardQueryService(MagicMock(), clock=lambda: NOW)
+
+    try:
+        service.list_tasks(
+            "E-CREATOR",
+            date_preset="custom",
+            start_date=date(2026, 8, 20),
+            end_date=date(2026, 8, 18),
+        )
+    except BusinessValidationError as exc:
+        assert "startDate" in str(exc)
+    else:
+        raise AssertionError("invalid custom date range should be rejected")
+
+
+def test_task_overview_filters_near_due_terminal_states_and_paginates(monkeypatch) -> None:
+    class AllowAll:
+        def __init__(self, _session) -> None:
+            pass
+
+        def can_access_task(self, _actor, _task) -> bool:
+            return True
+
+    monkeypatch.setattr("app.services.task_board_query.PermissionScopeService", AllowAll)
+    session = MagicMock()
+    near = _task("in_progress", task_name="near", deadline=NOW + timedelta(days=3))
+    later = _task("in_progress", task_name="later", deadline=NOW + timedelta(days=4))
+    terminal_tasks = [
+        _task(status, task_name=f"terminal-{status}", deadline=NOW + timedelta(days=1))
+        for status in ("archived", "cancelled", "withdrawn", "merged", "closed")
+    ]
+    session.scalars.return_value.all.return_value = [later, near, *terminal_tasks]
+    service = TaskBoardQueryService(session, clock=lambda: NOW)
+    service._users = MagicMock()
+    service._users.list_by_employee_nos.return_value = []
+    service._nodes = MagicMock()
+    service._nodes.list_nodes.return_value = []
+    service._nodes.list_dependencies.return_value = []
+    service._nodes.list_participants_by_task_id.return_value = []
+    service._tasks = MagicMock()
+    service._tasks.list_participants.return_value = []
+    service._issues = MagicMock()
+    service._issues.has_employee_relation.return_value = False
+    service._issues.has_non_closed.return_value = False
+    service._change_requests = MagicMock()
+    service._change_requests.get_pending.return_value = None
+    service._completion_reviews = MagicMock()
+    service._completion_reviews.get_current_submitted.return_value = None
+    service._completion_reviews.get_latest.return_value = None
+
+    result = service.list_tasks(
+        "E-CREATOR",
+        near_due=True,
+        page=1,
+        page_size=1,
+        limit=1,
+        offset=0,
+    )
+
+    assert result["total"] == 1
+    assert result["items"][0]["task_name"] == "near"
+    assert result["status_counts"]["in_progress"] == 1
+
+
+def test_node_overview_filters_permission_scoped_results_and_paginates(monkeypatch) -> None:
+    class Scope:
+        def __init__(self, _session) -> None:
+            pass
+
+        def can_access_task(self, _actor, task) -> bool:
+            return task.task_name != "hidden"
+
+    monkeypatch.setattr("app.services.task_board_query.PermissionScopeService", Scope)
+    session = MagicMock()
+    visible_task = _task("in_progress", task_name="visible")
+    hidden_task = _task("in_progress", task_name="hidden")
+    first_node = _node(
+        visible_task,
+        owner_employee_no="E-CREATOR",
+        planned_start_time=NOW,
+        planned_deadline=NOW + timedelta(days=1),
+    )
+    second_node = _node(
+        visible_task,
+        owner_employee_no="E-CREATOR",
+        node_name="later node",
+        node_order=2,
+        planned_start_time=NOW,
+        planned_deadline=NOW + timedelta(days=2),
+    )
+    hidden_node = _node(
+        hidden_task,
+        owner_employee_no="E-CREATOR",
+        planned_start_time=NOW,
+        planned_deadline=NOW + timedelta(days=1),
+    )
+    session.execute.return_value.all.return_value = [
+        (second_node, visible_task),
+        (hidden_node, hidden_task),
+        (first_node, visible_task),
+    ]
+    service = TaskBoardQueryService(session, clock=lambda: NOW)
+    service._users = MagicMock()
+    service._users.list_by_employee_nos.return_value = [
+        SimpleNamespace(employee_no="E-CREATOR", name="Creator")
+    ]
+
+    result = service.list_tasks(
+        "E-CREATOR",
+        mode="nodes",
+        near_due=True,
+        page=2,
+        page_size=1,
+        limit=1,
+        offset=1,
+    )
+
+    assert result["total"] == 2
+    assert result["page"] == 2
+    assert result["items"][0]["node_name"] == "later node"
+    assert result["items"][0]["owner"]["name"] == "Creator"
+    assert result["status_counts"]["in_progress"] == 2

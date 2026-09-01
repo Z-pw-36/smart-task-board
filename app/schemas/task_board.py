@@ -7,6 +7,17 @@ from pydantic import Field
 from app.schemas.common import StrictSchema, TaskStatus
 
 type TaskRelation = Literal["all", "created", "assigned", "participating"]
+type TaskOverviewMode = Literal["tasks", "nodes"]
+type TaskOverviewQuadrant = Literal[
+    "important_urgent",
+    "important_not_urgent",
+    "urgent_not_important",
+    "routine",
+]
+type TaskOverviewSort = Literal["deadline", "created_at", "updated_at", "status", "task_weight"]
+type SortOrder = Literal["asc", "desc"]
+type TaskOverviewDatePreset = Literal["all", "week", "month", "custom"]
+type TaskOverviewSupport = Literal["open"]
 type AllowedAction = Literal[
     "submit_for_confirmation",
     "confirm_and_send",
@@ -92,11 +103,33 @@ class TaskBoardSummaryResponse(StrictSchema):
     updated_at: datetime
 
 
+class TaskOverviewNodeResponse(StrictSchema):
+    node_id: UUID
+    task_id: UUID
+    task_no: str | None
+    task_name: str
+    node_name: str
+    status: str
+    task_status: TaskStatus
+    owner: EmployeeSummaryResponse | None
+    planned_start_time: datetime | None
+    planned_deadline: datetime | None
+    progress_percent: int
+    current_user_relations: list[str]
+    is_overdue: bool
+    days_until_deadline: int | None
+    created_at: datetime
+    updated_at: datetime
+
+
 class PaginatedTaskBoardResponse(StrictSchema):
-    items: list[TaskBoardSummaryResponse]
+    items: list[TaskBoardSummaryResponse | TaskOverviewNodeResponse]
     limit: int
     offset: int
+    page: int = 1
+    pageSize: int = 20
     total: int
+    status_counts: dict[str, int] = Field(default_factory=dict)
 
 
 class InboxNodeSummaryResponse(StrictSchema):

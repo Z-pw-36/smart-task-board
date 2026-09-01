@@ -940,7 +940,7 @@ python -m alembic upgrade head
 | DEV-01 | DONE | `web/src/styles/` tokens; `web/src/shared/components/` primitives; DEV-01 Playwright visual baseline | Vitest shared component tests 6 passed; Playwright DEV-01 3 passed | Frontend 43 passed; build/lint passed; backend pytest 345 passed/21 skipped; ruff/pip check passed | 2026-09-01 | No business API, employee data, backend code, route shell, or DEV-02+ work |
 | DEV-02 | DONE | `web/src/app/` route shell/router/navigation/return-state/placeholders; `web/src/App.tsx`; `web/src/components/AppShell.tsx` compatibility; DEV-02 route and Playwright responsive tests | DEV-02 route tests 25 passed; Playwright DEV-02 9 passed across 375/390/430 | Frontend 68 passed; DEV-01 component tests 6 passed; Playwright full 15 passed including DEV-01 visual baseline; build/lint passed; backend pytest 345 passed/21 skipped; ruff/pip check passed | 2026-09-01 | No business API, employee data, backend code, DB migration, or DEV-03+ implementation |
 | DEV-03 | DONE | `web/src/features/workbench/` Workbench feature; `/workbench` router integration; DEV-03 Playwright responsive/performance scenario | Workbench API projection tests 6 passed; Workbench UI tests 7 passed; Playwright DEV-03 6 passed across 375/390/430 | Frontend 81 passed; DEV-02 route tests 25 passed; DEV-01 component tests 6 passed; Playwright full 21 passed; build/lint passed; backend pytest 345 passed/21 skipped; ruff/pip check passed | 2026-09-01 | Reused `/api/v1/dashboard/summary` and `/api/v1/tasks`; no backend code, DB migration, fake business API, hard-coded employee data, localStorage business write, or DEV-04+ implementation |
-| DEV-04 | TODO | — | — | — | — | — |
+| DEV-04 | DONE | `web/src/features/task-overview/` Task Overview feature; `/tasks` router integration; `GET /api/v1/tasks` overview query params, node mode, server-side filters/pagination/sort; DEV-04 Playwright responsive/performance scenario | Task Overview UI tests 8 passed; task board API/service tests 24 passed; Playwright DEV-04 15 passed across 375/390/430 | Frontend 89 passed; Playwright full 36 passed; backend pytest 358 passed/21 skipped; build/lint passed; ruff/pip check passed | 2026-09-01 | No DEV-05 detail conversion, no fake business data, no localStorage business write, no DB migration |
 | DEV-05 | TODO | — | — | — | — | — |
 | DEV-06 | TODO | — | — | — | — | — |
 | DEV-07 | TODO | — | — | — | — | — |
@@ -988,6 +988,20 @@ python -m alembic upgrade head
 - P95基线：Playwright fixture环境；每个视口5次 `/workbench` 加载样本；full run P95：375px 164ms、390px 182ms、430px 191ms
 - 边界结果：Hard-coded employee data = No；Fake business API = No；localStorage business writes = No；Backend business code modified = No；DB migration = No；DEV-04+ implemented = No
 - 遗留风险：Workbench 使用现有摘要和任务查询能力；四象限展示消费后端 `priority_items` 投影，后续 DEV-04/DEV-14 继续补齐服务端筛选和优先级口径；AI入口仅导航到创建流程，不实现 DEV-07 AI识别/语音能力
+
+### 19.5 DEV-04 完成证据
+
+- 状态：DONE
+- Baseline HEAD：`26f50a61299e2e47fa0827cf19dff5d09fa2bcd4`
+- 实际文件：`app/api/v1/task_board.py`、`app/schemas/common.py`、`app/schemas/task_board.py`、`app/services/task_board_query.py`、`tests/api/test_task_board_routes.py`、`tests/services/test_task_board_query.py`、`web/src/api/types.ts`、`web/src/app/navigation.ts`、`web/src/app/router.tsx`、`web/src/app/router.test.tsx`、`web/src/features/task-overview/api.ts`、`web/src/features/task-overview/hooks.ts`、`web/src/features/task-overview/index.ts`、`web/src/features/task-overview/TaskOverviewPage.tsx`、`web/src/features/task-overview/TaskOverviewPage.css`、`web/src/features/task-overview/__tests__/TaskOverviewPage.test.tsx`、`web/e2e/dev-04-task-overview.spec.ts`
+- API复用/调整：复用并最小扩展 `GET /api/v1/tasks`；新增正式查询参数 `mode`、`status`、`quadrant`、`support`、`nearDue`、`datePreset`、`startDate`、`endDate`、`page`、`pageSize`、`sortBy`、`sortOrder`；未新增重复列表 API
+- 筛选实现：任务模式和我的节点模式均由服务端查询返回；状态、四象限、需要支持、近3天临期、开始日期、搜索、分页、排序通过 URL query 传入服务端；FastAPI Literal/Query 与服务层日期校验提供白名单和 422
+- 测试结果：`npm --prefix web run test -- --run src/features/task-overview/__tests__/TaskOverviewPage.test.tsx src/app/router.test.tsx` 33 passed；`ALLOW_TEST_EMPLOYEE_HEADER=true AUTH_MODE=test_header .venv/bin/python -m pytest -q tests/api/test_task_board_routes.py tests/services/test_task_board_query.py` 24 passed；`npm --prefix web run test -- --run` 89 passed；`npm --prefix web run lint` passed；`npm --prefix web run build` passed；`npm exec -- playwright test` in `web/` 36 passed；`ALLOW_TEST_EMPLOYEE_HEADER=true AUTH_MODE=test_header .venv/bin/python -m pytest -q` 358 passed / 21 skipped；`.venv/bin/python -m ruff check app tests` passed；`.venv/bin/python -m pip check` passed
+- 响应式证据：Playwright 覆盖 375×812、390×844、430×932，并在 DEV-04 场景内额外检查 768×1024、1440×900；horizontal overflow <= 0；任务概览可见链接/按钮 touch target >= 44px
+- P95基线：Playwright fixture 环境；常用状态筛选、节点模式、组合筛选、分页、自定义日期各 1 次样本/视口；full run P95：375px 286ms（217,119,179,286,141），390px 133ms（133,95,83,83,103），430px 126ms（126,72,75,89,94）
+- 安全/权限证据：`GET /tasks` 查询参数白名单拒绝非法 mode/status/quadrant/sort/order/page/pageSize；非法日期与 startDate > endDate 返回 422；节点模式仅返回当前用户负责或协同且通过 `PermissionScopeService.can_access_task` 的节点；无权节点不可见
+- 边界结果：DEV-05 Task Detail 正式转换 = No；DEV-06 Auth alignment = No；DEV-07 AI/ASR = No；DEV-08 Creation = No；DEV-09 Decomposition = No；DEV-14 calculations = No；Fake business data = No；localStorage business writes = No；DB migration = No；estimatedHours display/sort/filter = No
+- 遗留风险：`/task/:taskId` 仍是 DEV-02 占位，DEV-05 将消费 DEV-04 传递的 `#node-<nodeId>` 锚点和 return source；`GET /tasks` 当前在服务层完成排序/分页与范围过滤，后续数据量增长时可在保持相同契约下进一步下推到数据库排序/分页优化
 
 ## 20. 最终完成定义（Definition of Done）
 

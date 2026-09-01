@@ -1,7 +1,7 @@
-from datetime import UTC, date, datetime, time, timedelta
+from datetime import UTC, date, datetime, time, timedelta, timezone
 from uuid import UUID
 
-from sqlalchemy import false, func, select
+from sqlalchemy import exists, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.models import (
@@ -10,6 +10,7 @@ from app.models import (
     TaskChangeRequest,
     TaskCompletionReview,
     TaskConflict,
+    TaskIssue,
     TaskNode,
     TaskNodeDependency,
     TaskNodeParticipant,
@@ -28,17 +29,32 @@ from app.repositories import (
     UserRepository,
 )
 from app.services.business_capabilities import PermissionScopeService
-from app.services.errors import EntityNotFoundError, PermissionDeniedError
+from app.services.errors import BusinessValidationError, EntityNotFoundError, PermissionDeniedError
 from app.services.progress_report import task_report_period
 from app.services.task_issue import issue_allowed_actions
 
 DUE_WINDOW_DAYS = 7
+NEAR_DUE_DAYS = 3
+BUSINESS_TZ = timezone(timedelta(hours=8))
+TERMINAL_TASK_STATUSES = {"completed", "archived", "cancelled", "withdrawn", "merged", "closed"}
+OVERVIEW_STATUS_KEYS = [
+    "pending_acceptance",
+    "in_progress",
+    "blocked",
+    "pending_report",
+    "pending_review",
+]
+QUADRANT_VALUES = {"important_urgent", "important_not_urgent", "urgent_not_important", "routine"}
 
 
 def _aware_utc(value: datetime) -> datetime:
     if value.tzinfo is None or value.utcoffset() is None:
         return value.replace(tzinfo=UTC)
     return value.astimezone(UTC)
+
+
+def _reverse_text(value: str) -> tuple[int, ...]:
+    return tuple(-ord(character) for character in value)
 
 
 def completion_review_allowed_actions(
@@ -230,6 +246,44 @@ class TaskBoardQueryService:
         )
         return start, end
 
+    def _start_date_boundaries(
+        self,
+        date_preset: str,
+        start_date: date | None,
+        end_date: date | None,
+    ) -> tuple[datetime | None, datetime | None]:
+        if date_preset == "all":
+            return None, None
+        if date_preset == "custom":
+            if start_date is None or end_date is None:
+                raise BusinessValidationError("custom datePreset requires startDate and endDate")
+            if start_date > end_date:
+                raise BusinessValidationError("startDate must not be after endDate")
+            return self._local_day_boundaries(start_date, end_date)
+
+        today = _aware_utc(self._clock()).astimezone(BUSINESS_TZ).date()
+        if date_preset == "week":
+            week_start = today - timedelta(days=today.weekday())
+            return self._local_day_boundaries(week_start, week_start + timedelta(days=6))
+        if date_preset == "month":
+            month_start = today.replace(day=1)
+            next_month = (
+                month_start.replace(year=month_start.year + 1, month=1)
+                if month_start.month == 12
+                else month_start.replace(month=month_start.month + 1)
+            )
+            return self._local_day_boundaries(month_start, next_month - timedelta(days=1))
+        raise BusinessValidationError("datePreset is invalid")
+
+    @staticmethod
+    def _local_day_boundaries(
+        start_date: date,
+        end_date: date,
+    ) -> tuple[datetime, datetime]:
+        start = datetime.combine(start_date, time.min, BUSINESS_TZ).astimezone(UTC)
+        end = datetime.combine(end_date + timedelta(days=1), time.min, BUSINESS_TZ).astimezone(UTC)
+        return start, end
+
     def _review_context(
         self,
         task_id: UUID,
@@ -305,42 +359,77 @@ class TaskBoardQueryService:
         self,
         actor: str,
         *,
-        relation: str,
-        task_status: str | None,
-        search: str | None,
-        deadline_from: date | None,
-        deadline_to: date | None,
-        limit: int,
-        offset: int,
+        relation: str = "all",
+        mode: str = "tasks",
+        task_status: str | None = None,
+        quadrant: str | None = None,
+        support: str | None = None,
+        near_due: bool = False,
+        date_preset: str = "all",
+        search: str | None = None,
+        deadline_from: date | None = None,
+        deadline_to: date | None = None,
+        start_date: date | None = None,
+        end_date: date | None = None,
+        sort_by: str = "deadline",
+        sort_order: str = "asc",
+        page: int = 1,
+        page_size: int = 20,
+        limit: int = 20,
+        offset: int = 0,
     ) -> dict[str, object]:
-        start, end = self._date_boundaries(deadline_from, deadline_to)
+        if start_date and end_date and start_date > end_date:
+            raise BusinessValidationError("startDate must not be after endDate")
+        if deadline_from and deadline_to and deadline_from > deadline_to:
+            raise BusinessValidationError("deadline_from must not be after deadline_to")
+        deadline_start, deadline_end = self._date_boundaries(deadline_from, deadline_to)
+        start, end = self._start_date_boundaries(date_preset, start_date, end_date)
         normalized_search = search.strip() if search and search.strip() else None
-        if relation == "all":
-            tasks, total = self._list_visible_tasks(
+        if mode == "nodes":
+            nodes, total, status_counts = self._list_visible_nodes(
                 actor,
                 task_status=task_status,
                 search=normalized_search,
-                deadline_from=start,
-                deadline_to=end,
+                quadrant=quadrant,
+                support=support,
+                near_due=near_due,
+                deadline_from=deadline_start,
+                deadline_to=deadline_end,
+                start_date_from=start,
+                start_date_to=end,
+                sort_by=sort_by,
+                sort_order=sort_order,
                 limit=limit,
                 offset=offset,
             )
+            items = [self._overview_node_summary(node, task, actor) for node, task in nodes]
         else:
-            tasks, total = self._tasks.list_related(
+            tasks, total, status_counts = self._list_visible_tasks(
                 actor,
                 relation=relation,
                 task_status=task_status,
                 search=normalized_search,
-                deadline_from=start,
-                deadline_to=end,
+                quadrant=quadrant,
+                support=support,
+                near_due=near_due,
+                deadline_from=deadline_start,
+                deadline_to=deadline_end,
+                start_date_from=start,
+                start_date_to=end,
+                sort_by=sort_by,
+                sort_order=sort_order,
                 limit=limit,
                 offset=offset,
             )
+            items = [self._summary(task, actor) for task in tasks]
         return {
-            "items": [self._summary(task, actor) for task in tasks],
+            "items": items,
             "limit": limit,
             "offset": offset,
+            "page": page,
+            "pageSize": page_size,
             "total": total,
+            "status_counts": status_counts,
         }
 
     def list_inbox(
@@ -618,35 +707,310 @@ class TaskBoardQueryService:
         self,
         actor: str,
         *,
+        relation: str,
         task_status: str | None,
         search: str | None,
+        quadrant: str | None,
+        support: str | None,
+        near_due: bool,
         deadline_from: datetime | None,
         deadline_to: datetime | None,
+        start_date_from: datetime | None,
+        start_date_to: datetime | None,
+        sort_by: str,
+        sort_order: str,
         limit: int,
         offset: int,
-    ) -> tuple[list[Task], int]:
+    ) -> tuple[list[Task], int, dict[str, int]]:
         permission = PermissionScopeService(self._session)
-        statement = select(Task)
+        statement = select(Task).where(TaskRepository._relation_predicate(actor, relation))
         if task_status is not None:
             statement = statement.where(Task.status == task_status)
         if search:
             statement = statement.where(Task.task_name.contains(search, autoescape=True))
+        if quadrant is not None:
+            statement = statement.where(
+                exists().where(
+                    TaskPriorityScore.task_id == Task.task_id,
+                    TaskPriorityScore.priority_quadrant == quadrant,
+                )
+            )
+        if support == "open":
+            statement = statement.where(
+                exists().where(
+                    TaskIssue.task_id == Task.task_id,
+                    TaskIssue.status.in_(("open", "processing")),
+                )
+            )
+        if near_due:
+            now = _aware_utc(self._clock())
+            statement = statement.where(
+                Task.deadline.is_not(None),
+                Task.deadline >= now,
+                Task.deadline <= now + timedelta(days=NEAR_DUE_DAYS),
+                Task.status.not_in(TERMINAL_TASK_STATUSES),
+            )
         if deadline_from is not None:
             statement = statement.where(Task.deadline >= deadline_from)
         if deadline_to is not None:
             statement = statement.where(Task.deadline < deadline_to)
-        statement = statement.order_by(
-            func.coalesce(Task.is_urgent, false()).desc(),
-            Task.deadline.asc().nulls_last(),
-            Task.created_at.desc(),
-            Task.task_id,
-        )
+        if start_date_from is not None:
+            statement = statement.where(Task.start_time >= start_date_from)
+        if start_date_to is not None:
+            statement = statement.where(Task.start_time < start_date_to)
+
         visible = [
             task
             for task in self._session.scalars(statement).all()
             if permission.can_access_task(actor, task)
+            and self._task_matches_runtime_filters(
+                task,
+                task_status=task_status,
+                search=search,
+                near_due=near_due,
+                deadline_from=deadline_from,
+                deadline_to=deadline_to,
+                start_date_from=start_date_from,
+                start_date_to=start_date_to,
+            )
         ]
-        return visible[offset : offset + limit], len(visible)
+        status_counts = self._status_counts(task.status for task in visible)
+        sorted_tasks = sorted(
+            visible,
+            key=lambda task: self._task_sort_key(task, sort_by, sort_order),
+        )
+        return sorted_tasks[offset : offset + limit], len(sorted_tasks), status_counts
+
+    def _list_visible_nodes(
+        self,
+        actor: str,
+        *,
+        task_status: str | None,
+        search: str | None,
+        quadrant: str | None,
+        support: str | None,
+        near_due: bool,
+        deadline_from: datetime | None,
+        deadline_to: datetime | None,
+        start_date_from: datetime | None,
+        start_date_to: datetime | None,
+        sort_by: str,
+        sort_order: str,
+        limit: int,
+        offset: int,
+    ) -> tuple[list[tuple[TaskNode, Task]], int, dict[str, int]]:
+        permission = PermissionScopeService(self._session)
+        participant_access = exists().where(
+            TaskNodeParticipant.task_id == TaskNode.task_id,
+            TaskNodeParticipant.node_id == TaskNode.node_id,
+            TaskNodeParticipant.employee_no == actor,
+            TaskNodeParticipant.participant_role.in_(("owner", "collaborator")),
+        )
+        statement = (
+            select(TaskNode, Task)
+            .join(Task, Task.task_id == TaskNode.task_id)
+            .where(or_(TaskNode.owner_employee_no == actor, participant_access))
+        )
+        if task_status is not None:
+            statement = statement.where(Task.status == task_status)
+        if search:
+            statement = statement.where(
+                or_(
+                    Task.task_name.contains(search, autoescape=True),
+                    TaskNode.node_name.contains(search, autoescape=True),
+                )
+            )
+        if quadrant is not None:
+            statement = statement.where(
+                exists().where(
+                    TaskPriorityScore.task_id == Task.task_id,
+                    TaskPriorityScore.priority_quadrant == quadrant,
+                )
+            )
+        if support == "open":
+            statement = statement.where(
+                exists().where(
+                    TaskIssue.task_id == Task.task_id,
+                    TaskIssue.status.in_(("open", "processing")),
+                )
+            )
+        if near_due:
+            now = _aware_utc(self._clock())
+            statement = statement.where(
+                TaskNode.planned_deadline.is_not(None),
+                TaskNode.planned_deadline >= now,
+                TaskNode.planned_deadline <= now + timedelta(days=NEAR_DUE_DAYS),
+                TaskNode.status != "completed",
+                Task.status.not_in(TERMINAL_TASK_STATUSES),
+            )
+        if deadline_from is not None:
+            statement = statement.where(TaskNode.planned_deadline >= deadline_from)
+        if deadline_to is not None:
+            statement = statement.where(TaskNode.planned_deadline < deadline_to)
+        if start_date_from is not None:
+            statement = statement.where(TaskNode.planned_start_time >= start_date_from)
+        if start_date_to is not None:
+            statement = statement.where(TaskNode.planned_start_time < start_date_to)
+
+        visible = [
+            (node, task)
+            for node, task in self._session.execute(statement).all()
+            if permission.can_access_task(actor, task)
+            and self._node_matches_runtime_filters(
+                node,
+                task,
+                task_status=task_status,
+                search=search,
+                near_due=near_due,
+                deadline_from=deadline_from,
+                deadline_to=deadline_to,
+                start_date_from=start_date_from,
+                start_date_to=start_date_to,
+            )
+        ]
+        status_counts = self._status_counts(task.status for _, task in visible)
+        sorted_nodes = sorted(
+            visible,
+            key=lambda pair: self._node_sort_key(pair[0], pair[1], sort_by, sort_order),
+        )
+        return sorted_nodes[offset : offset + limit], len(sorted_nodes), status_counts
+
+    def _task_matches_runtime_filters(
+        self,
+        task: Task,
+        *,
+        task_status: str | None,
+        search: str | None,
+        near_due: bool,
+        deadline_from: datetime | None,
+        deadline_to: datetime | None,
+        start_date_from: datetime | None,
+        start_date_to: datetime | None,
+    ) -> bool:
+        if task_status is not None and task.status != task_status:
+            return False
+        if search and search.casefold() not in task.task_name.casefold():
+            return False
+        if not self._datetime_in_range(task.deadline, deadline_from, deadline_to):
+            return False
+        if not self._datetime_in_range(task.start_time, start_date_from, start_date_to):
+            return False
+        if near_due and not self._is_near_due(task.deadline, task.status):
+            return False
+        return True
+
+    def _node_matches_runtime_filters(
+        self,
+        node: TaskNode,
+        task: Task,
+        *,
+        task_status: str | None,
+        search: str | None,
+        near_due: bool,
+        deadline_from: datetime | None,
+        deadline_to: datetime | None,
+        start_date_from: datetime | None,
+        start_date_to: datetime | None,
+    ) -> bool:
+        if task_status is not None and task.status != task_status:
+            return False
+        if search:
+            query = search.casefold()
+            if query not in task.task_name.casefold() and query not in node.node_name.casefold():
+                return False
+        if not self._datetime_in_range(node.planned_deadline, deadline_from, deadline_to):
+            return False
+        if not self._datetime_in_range(node.planned_start_time, start_date_from, start_date_to):
+            return False
+        if near_due and (
+            node.status == "completed"
+            or task.status in TERMINAL_TASK_STATUSES
+            or not self._is_near_due(node.planned_deadline, task.status)
+        ):
+            return False
+        return True
+
+    @staticmethod
+    def _datetime_in_range(
+        value: datetime | None,
+        start: datetime | None,
+        end: datetime | None,
+    ) -> bool:
+        if start is None and end is None:
+            return True
+        if value is None:
+            return False
+        current = _aware_utc(value)
+        if start is not None and current < start:
+            return False
+        return end is None or current < end
+
+    def _is_near_due(self, value: datetime | None, status: str) -> bool:
+        if value is None or status in TERMINAL_TASK_STATUSES:
+            return False
+        deadline = _aware_utc(value)
+        now = _aware_utc(self._clock())
+        return now <= deadline <= now + timedelta(days=NEAR_DUE_DAYS)
+
+    @staticmethod
+    def _status_counts(statuses) -> dict[str, int]:
+        counts = {status: 0 for status in OVERVIEW_STATUS_KEYS}
+        for status in statuses:
+            if status in counts:
+                counts[status] += 1
+        return counts
+
+    @staticmethod
+    def _sort_value(value: object) -> tuple[int, object]:
+        if value is None:
+            return (1, "")
+        if isinstance(value, datetime):
+            return (0, _aware_utc(value).timestamp())
+        return (0, value)
+
+    def _task_sort_key(self, task: Task, sort_by: str, sort_order: str) -> tuple[object, ...]:
+        values = {
+            "deadline": task.deadline,
+            "created_at": task.created_at,
+            "updated_at": task.updated_at,
+            "status": task.status,
+            "task_weight": task.task_weight,
+        }
+        primary = self._sort_value(values[sort_by])
+        if sort_order == "desc" and primary[0] == 0:
+            value = primary[1]
+            primary = (0, -value if isinstance(value, int | float) else _reverse_text(str(value)))
+        return (
+            primary,
+            -_aware_utc(task.created_at).timestamp(),
+            str(task.task_id),
+        )
+
+    def _node_sort_key(
+        self,
+        node: TaskNode,
+        task: Task,
+        sort_by: str,
+        sort_order: str,
+    ) -> tuple[object, ...]:
+        values = {
+            "deadline": node.planned_deadline,
+            "created_at": task.created_at,
+            "updated_at": task.updated_at,
+            "status": node.status,
+            "task_weight": task.task_weight,
+        }
+        primary = self._sort_value(values[sort_by])
+        if sort_order == "desc" and primary[0] == 0:
+            value = primary[1]
+            primary = (0, -value if isinstance(value, int | float) else _reverse_text(str(value)))
+        return (
+            primary,
+            task.task_name,
+            node.node_order,
+            node.sort_weight,
+            str(node.node_id),
+        )
 
     def dashboard_summary(self, actor: str) -> dict[str, object]:
         now = _aware_utc(self._clock())
@@ -952,6 +1316,50 @@ class TaskBoardQueryService:
             "allowed_actions": [action_code],
             "is_overdue": task_summary["is_overdue"],
             "relevant_at": request.created_at,
+        }
+
+    def _overview_node_summary(
+        self,
+        node: TaskNode,
+        task: Task,
+        actor: str,
+    ) -> dict[str, object]:
+        owners = (
+            self._users.list_by_employee_nos((node.owner_employee_no,))
+            if node.owner_employee_no
+            else []
+        )
+        owner = owners[0] if owners else None
+        now = _aware_utc(self._clock())
+        deadline = _aware_utc(node.planned_deadline) if node.planned_deadline else None
+        relations = ["node_owner"] if actor == node.owner_employee_no else ["node_participant"]
+        return {
+            "node_id": node.node_id,
+            "task_id": task.task_id,
+            "task_no": task.task_no,
+            "task_name": task.task_name,
+            "node_name": node.node_name,
+            "status": node.status,
+            "task_status": task.status,
+            "owner": (
+                {"employee_no": owner.employee_no, "name": owner.name}
+                if owner is not None
+                else (
+                    {"employee_no": node.owner_employee_no, "name": node.owner_employee_no}
+                    if node.owner_employee_no
+                    else None
+                )
+            ),
+            "planned_start_time": node.planned_start_time,
+            "planned_deadline": node.planned_deadline,
+            "progress_percent": node.progress_percent,
+            "current_user_relations": relations,
+            "is_overdue": deadline is not None and node.status != "completed" and deadline < now,
+            "days_until_deadline": (
+                (deadline.date() - now.date()).days if deadline is not None else None
+            ),
+            "created_at": task.created_at,
+            "updated_at": task.updated_at,
         }
 
     @staticmethod
