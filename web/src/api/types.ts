@@ -307,6 +307,8 @@ export interface TaskIntakeResponse {
   low_confidence_fields: string[];
   confirm_questions: string[];
   confidence_score: string | null;
+  job_status?: "pending" | "running" | "succeeded" | "failed";
+  retry_after_seconds?: number | null;
 }
 
 export interface TaskClarificationPayload {

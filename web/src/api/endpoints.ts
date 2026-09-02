@@ -197,6 +197,16 @@ export function submitTaskInput(payload: TaskInputPayload): Promise<TaskIntakeRe
   });
 }
 
+export function retryTaskInputExtraction(inputId: string): Promise<TaskIntakeResponse> {
+  return apiRequest<TaskIntakeResponse>(`/api/v1/task-inputs/${inputId}/extract`, {
+    method: "POST",
+  });
+}
+
+export function getTaskInputExtraction(inputId: string): Promise<TaskIntakeResponse> {
+  return apiRequest<TaskIntakeResponse>(`/api/v1/task-inputs/${inputId}/extraction`);
+}
+
 export function clarifyTaskInput(
   inputId: string,
   payload: TaskClarificationPayload,

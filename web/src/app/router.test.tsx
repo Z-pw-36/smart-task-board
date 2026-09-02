@@ -99,7 +99,6 @@ const formalTaskRoutes = [
 
 const placeholderTargetRoutes = [
   ["/task/DEV02-TASK-001/decomposition", "AI 拆解状态"],
-  ["/create/details", "创建任务"],
   ["/create/confirm", "确认发送"],
   ["/notifications", "通知中心"],
   ["/profile", "我的"],
@@ -237,6 +236,15 @@ describe("DEV-02 target router", () => {
     expect(screen.getAllByRole("heading", { name: title }).length).toBeGreaterThan(0);
     expect(screen.getByTestId("route-contract")).toHaveTextContent("Business API");
     expect(screen.getByTestId("route-contract")).toHaveTextContent("No");
+  });
+
+  it("recognizes /create/details and renders the DEV-07 intake page", () => {
+    renderRoutes({ route: "/create/details" });
+
+    expect(screen.getByTestId("app-shell")).toBeInTheDocument();
+    expect(screen.getByTestId("task-intake-page")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "描述任务" })).toBeInTheDocument();
+    expect(screen.queryByTestId("route-contract")).not.toBeInTheDocument();
   });
 
   it.each([

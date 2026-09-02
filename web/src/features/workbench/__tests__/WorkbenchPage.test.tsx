@@ -116,7 +116,7 @@ describe("WorkbenchPage", () => {
     renderWorkbench();
 
     expect(await screen.findByRole("link", { name: "描述任务" })).toHaveAttribute("href", "/create/details");
-    expect(screen.getByRole("link", { name: "语音暂不可用，改用文字描述任务" })).toHaveAttribute("href", "/create/details");
+    expect(screen.getByRole("link", { name: "语音描述任务" })).toHaveAttribute("href", "/create/details");
     expect(screen.getByRole("link", { name: "全部任务" })).toHaveAttribute("href", "/tasks");
     expect(screen.getByRole("link", { name: /通知，2 条未读/ })).toHaveAttribute("href", "/notifications");
     expect(screen.getByRole("link", { name: /发布原型任务看板/ })).toHaveAttribute("href", `/task/${taskSummary.task_id}`);

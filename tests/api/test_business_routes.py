@@ -183,6 +183,77 @@ def test_parameter_permission_and_intake_routes_forward_actor(
     assert intake.json()["extraction_id"] == str(extraction_id)
 
 
+def test_dev07_task_input_voice_retry_and_latest_extraction_routes(
+    business_context,
+) -> None:
+    client, services = business_context
+    intake_id = uuid4()
+    first_extraction_id = uuid4()
+    latest_extraction_id = uuid4()
+    services["intake"].submit_input.return_value = _intake_result(intake_id, first_extraction_id)
+    services["intake"].retry_extraction.return_value = _intake_result(
+        intake_id,
+        latest_extraction_id,
+    )
+    services["intake"].get_latest_extraction.return_value = _intake_result(
+        intake_id,
+        latest_extraction_id,
+    )
+
+    voice = client.post(
+        "/api/v1/task-inputs",
+        headers={"X-Employee-No": "E-ACTOR"},
+        json={
+            "input_id": str(intake_id),
+            "input_type": "voice",
+            "raw_text": "浏览器语音转写文本",
+            "source_channel": "web",
+        },
+    )
+    retried = client.post(
+        f"/api/v1/task-inputs/{intake_id}/extract",
+        headers={"X-Employee-No": "E-ACTOR"},
+    )
+    latest = client.get(
+        f"/api/v1/task-inputs/{intake_id}/extraction",
+        headers={"X-Employee-No": "E-ACTOR"},
+    )
+
+    assert [voice.status_code, retried.status_code, latest.status_code] == [201, 200, 200]
+    services["intake"].submit_input.assert_called_once_with(
+        "E-ACTOR",
+        input_id=intake_id,
+        input_type="voice",
+        raw_text="浏览器语音转写文本",
+        voice_file_url=None,
+        source_channel="web",
+    )
+    services["intake"].retry_extraction.assert_called_once_with("E-ACTOR", intake_id)
+    services["intake"].get_latest_extraction.assert_called_once_with("E-ACTOR", intake_id)
+    assert latest.json()["job_status"] == "succeeded"
+    assert latest.json()["extraction_id"] == str(latest_extraction_id)
+
+
+def test_dev07_task_input_rejects_empty_and_overlong_payloads(
+    business_context,
+) -> None:
+    client, services = business_context
+
+    empty = client.post(
+        "/api/v1/task-inputs",
+        headers={"X-Employee-No": "E-ACTOR"},
+        json={"raw_text": "   ", "source_channel": "web"},
+    )
+    overlong = client.post(
+        "/api/v1/task-inputs",
+        headers={"X-Employee-No": "E-ACTOR"},
+        json={"raw_text": "字" * 4001, "source_channel": "web"},
+    )
+
+    assert [empty.status_code, overlong.status_code] == [422, 422]
+    services["intake"].submit_input.assert_not_called()
+
+
 def test_ai_confirmation_metric_and_planning_routes_forward_identifiers(
     business_context,
 ) -> None:

@@ -105,15 +105,17 @@ class AuthorizedScopeResponse(StrictSchema):
 class TaskInputCreateRequest(StrictSchema):
     input_id: UUID | None = None
     input_type: Literal["text", "voice", "wecom_text"] = "text"
-    raw_text: str | None = None
-    voice_file_url: str | None = None
+    raw_text: str | None = Field(default=None, max_length=4000)
+    voice_file_url: str | None = Field(default=None, max_length=500)
     source_channel: Literal["web", "api", "wecom"] = "api"
 
     @model_validator(mode="after")
     def validate_content(self) -> TaskInputCreateRequest:
         if self.input_type == "voice":
-            if not self.voice_file_url:
-                raise ValueError("voice_file_url is required for voice input")
+            if not self.voice_file_url and not (self.raw_text or "").strip():
+                raise ValueError(
+                    "voice_file_url or raw_text transcript is required for voice input"
+                )
         elif not self.raw_text or not self.raw_text.strip():
             raise ValueError("raw_text is required for text input")
         return self
@@ -137,6 +139,12 @@ class TaskIntakeResponse(StrictSchema):
     low_confidence_fields: list[str]
     confirm_questions: list[str]
     confidence_score: DecimalString | None
+    job_status: Literal["succeeded"] = "succeeded"
+    retry_after_seconds: int | None = None
+
+
+class TaskExtractionResponse(TaskIntakeResponse):
+    pass
 
 
 class ConfirmExtractionTaskRequest(StrictSchema):

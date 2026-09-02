@@ -61,6 +61,39 @@ ACTIVE_TASK_STATUSES = frozenset(
         "pending_review",
     }
 )
+INTAKE_TEXT_MAX_LENGTH = 4000
+INTAKE_EMPLOYEE_FIELDS = (
+    "main_assignee_employee_no",
+    "report_to_employee_no",
+    "reviewer_employee_no",
+)
+INTAKE_DATE_FIELDS = ("start_time", "deadline")
+INTAKE_ALLOWED_FIELDS = frozenset(
+    {
+        "agent_result",
+        "task_draft",
+        "task_name",
+        "task_description",
+        "task_goal",
+        "task_source",
+        "main_assignee_employee_no",
+        "report_to_employee_no",
+        "report_to_level",
+        "reviewer_employee_no",
+        "department_id",
+        "start_time",
+        "deadline",
+        "task_weight",
+        "deliverable",
+        "acceptance_criteria",
+        "is_urgent",
+        "report_cycle",
+        "collaborators",
+        "performance_metric",
+        "nodes",
+        "dependencies",
+    }
+)
 TERMINAL_TASK_STATUSES = frozenset(
     {"completed", "archived", "cancelled", "withdrawn", "merged", "closed"}
 )
@@ -899,14 +932,20 @@ class TaskIntakeService:
         if input_id is not None:
             existing = self.session.get(TaskInput, input_id)
             if existing is not None:
+                self._require_task_input_owner(actor, existing)
                 extraction = self._latest_extraction(existing.input_id)
                 if extraction is None:
                     raise BusinessValidationError("existing task input has no extraction record")
                 return IntakeResult(existing, extraction)
         text = raw_text
         if input_type == "voice":
-            text = self.asr_provider.transcribe(_required_text(voice_file_url, "voice_file_url"))
+            text = (
+                self.asr_provider.transcribe(_required_text(voice_file_url, "voice_file_url"))
+                if voice_file_url
+                else raw_text
+            )
         text = _required_text(text, "raw_text")
+        self._validate_input_length(text)
         now = self.clock()
         task_input = TaskInput(
             input_id=input_id or uuid4(),
@@ -931,7 +970,7 @@ class TaskIntakeService:
             if self._uses_structured_agent_context()
             else None
         )
-        extracted = self.extraction_provider.extract(text, context=context)
+        extracted = self._run_extraction(text, context=context)
         extraction = AIExtractionRecord(
             input_id=task_input.input_id,
             extracted_json=_json_value(extracted["extracted_json"]),
@@ -955,13 +994,12 @@ class TaskIntakeService:
         return IntakeResult(task_input, extraction)
 
     def clarify(self, actor: str, input_id: UUID, answers: Mapping[str, object]) -> IntakeResult:
-        task_input = self.session.get(TaskInput, input_id)
-        if task_input is None:
-            raise EntityNotFoundError("task input was not found")
-        if task_input.submitted_by_employee_no != actor:
-            raise PermissionDeniedError("actor cannot clarify this task input")
+        task_input = self._get_owned_task_input(actor, input_id, action="clarify")
         previous = self._latest_extraction(input_id)
         source_text = task_input.asr_text or task_input.raw_text or ""
+        clarification_text = answers.get("clarification_text")
+        if isinstance(clarification_text, str) and clarification_text.strip():
+            source_text = f"{source_text}\n{clarification_text.strip()}"
         context = (
             self._agent_context(
                 actor,
@@ -977,7 +1015,7 @@ class TaskIntakeService:
             if self._uses_structured_agent_context()
             else self._legacy_clarification_context(previous, answers)
         )
-        extracted = self.extraction_provider.extract(source_text, context=context)
+        extracted = self._run_extraction(source_text, context=context)
         now = self.clock()
         extraction = AIExtractionRecord(
             input_id=input_id,
@@ -1001,6 +1039,54 @@ class TaskIntakeService:
             at=now,
         )
         self.session.commit()
+        return IntakeResult(task_input, extraction)
+
+    def retry_extraction(self, actor: str, input_id: UUID) -> IntakeResult:
+        task_input = self._get_owned_task_input(actor, input_id, action="retry")
+        source_text = self._source_text(task_input)
+        previous = self._latest_extraction(input_id)
+        now = self.clock()
+        context = (
+            self._agent_context(
+                actor,
+                input_id=input_id,
+                input_type=task_input.input_type,
+                raw_text=task_input.raw_text,
+                asr_text=task_input.asr_text,
+                source_channel=task_input.source_channel,
+                now=now,
+                previous=previous,
+            )
+            if self._uses_structured_agent_context()
+            else (dict(previous.extracted_json) if previous is not None else None)
+        )
+        extracted = self._run_extraction(source_text, context=context)
+        extraction = AIExtractionRecord(
+            input_id=input_id,
+            extracted_json=_json_value(extracted["extracted_json"]),
+            missing_fields=list(extracted["missing_fields"]),
+            low_confidence_fields=list(extracted["low_confidence_fields"]),
+            confirm_questions=list(extracted["confirm_questions"]),
+            confidence_score=_decimal(extracted.get("confidence_score")),
+        )
+        self.session.add(extraction)
+        _add_operation_log(
+            self.session,
+            actor=actor,
+            action="task_input_extraction_retried",
+            object_type="task_input",
+            object_id=input_id,
+            after_data={"extraction_id": extraction.extraction_id},
+            at=now,
+        )
+        self.session.commit()
+        return IntakeResult(task_input, extraction)
+
+    def get_latest_extraction(self, actor: str, input_id: UUID) -> IntakeResult:
+        task_input = self._get_owned_task_input(actor, input_id, action="read")
+        extraction = self._latest_extraction(input_id)
+        if extraction is None:
+            raise EntityNotFoundError("AI extraction record was not found")
         return IntakeResult(task_input, extraction)
 
     def create_draft_from_extraction(
@@ -1376,6 +1462,180 @@ class TaskIntakeService:
         if user is None or user.status != "active":
             raise PermissionDeniedError("actor is not active")
         return user
+
+    def _get_owned_task_input(self, actor: str, input_id: UUID, *, action: str) -> TaskInput:
+        self._require_active_user(actor)
+        task_input = self.session.get(TaskInput, input_id)
+        if task_input is None:
+            raise EntityNotFoundError("task input was not found")
+        self._require_task_input_owner(actor, task_input, action=action)
+        return task_input
+
+    @staticmethod
+    def _require_task_input_owner(
+        actor: str,
+        task_input: TaskInput,
+        *,
+        action: str = "access",
+    ) -> None:
+        if task_input.submitted_by_employee_no != actor:
+            raise PermissionDeniedError(f"actor cannot {action} this task input")
+
+    def _source_text(self, task_input: TaskInput) -> str:
+        text = _required_text(task_input.asr_text or task_input.raw_text, "raw_text")
+        self._validate_input_length(text)
+        return text
+
+    @staticmethod
+    def _validate_input_length(text: str) -> None:
+        if len(text) > INTAKE_TEXT_MAX_LENGTH:
+            raise BusinessValidationError("raw_text must be at most 4000 characters")
+
+    def _run_extraction(
+        self,
+        text: str,
+        *,
+        context: Mapping[str, object] | None,
+    ) -> dict[str, object]:
+        try:
+            extracted = self.extraction_provider.extract(text, context=context)
+        except RuntimeError as exc:
+            message = str(exc)
+            if "429" in message:
+                raise BusinessValidationError("AI provider is rate limited; retry later") from exc
+            raise BusinessValidationError(
+                "AI extraction is temporarily unavailable; retry later"
+            ) from exc
+        except (TimeoutError, ValueError, KeyError, TypeError) as exc:
+            raise BusinessValidationError(
+                "AI extraction response was invalid; retry later"
+            ) from exc
+        return self._validated_extraction_result(extracted)
+
+    def _validated_extraction_result(self, extracted: Mapping[str, object]) -> dict[str, object]:
+        if not isinstance(extracted, Mapping):
+            raise BusinessValidationError("AI extraction response was invalid")
+        raw_payload = extracted.get("extracted_json")
+        if not isinstance(raw_payload, Mapping):
+            raise BusinessValidationError("AI extraction response was invalid")
+        payload = {
+            str(key): _json_value(value)
+            for key, value in raw_payload.items()
+            if str(key) in INTAKE_ALLOWED_FIELDS
+        }
+        payload.pop("estimated_hours", None)
+        missing = self._field_list(extracted.get("missing_fields"))
+        low_confidence = self._field_list(extracted.get("low_confidence_fields"))
+        for field in ("estimated_hours", "nodes", "dependencies"):
+            if field == "estimated_hours":
+                while field in missing:
+                    missing.remove(field)
+                while field in low_confidence:
+                    low_confidence.remove(field)
+        self._validate_extracted_people(payload, missing, low_confidence)
+        self._validate_extracted_dates(payload, missing, low_confidence)
+        self._validate_task_weight(payload, missing, low_confidence)
+        questions = self._field_list(extracted.get("confirm_questions"), limit=10)
+        return {
+            "extracted_json": payload,
+            "missing_fields": list(dict.fromkeys(missing)),
+            "low_confidence_fields": list(dict.fromkeys(low_confidence)),
+            "confirm_questions": questions,
+            "confidence_score": _decimal(extracted.get("confidence_score"), default=Decimal("0")),
+        }
+
+    @staticmethod
+    def _field_list(value: object, *, limit: int = 50) -> list[str]:
+        if value is None:
+            return []
+        if isinstance(value, (str, bytes, bytearray)):
+            return [str(value)[:200]]
+        if not isinstance(value, Sequence):
+            return []
+        return [str(item)[:200] for item in value[:limit] if str(item).strip()]
+
+    def _validate_extracted_people(
+        self,
+        payload: dict[str, object],
+        missing: list[str],
+        low_confidence: list[str],
+    ) -> None:
+        for field in INTAKE_EMPLOYEE_FIELDS:
+            value = payload.get(field)
+            if not isinstance(value, str) or not value.strip():
+                continue
+            resolved = self._resolve_employee_reference(value.strip())
+            if resolved is None:
+                payload[field] = None
+                missing.append(field)
+                low_confidence.append(field)
+            else:
+                payload[field] = resolved
+        collaborators = payload.get("collaborators")
+        if isinstance(collaborators, Sequence) and not isinstance(
+            collaborators, (str, bytes, bytearray)
+        ):
+            valid_collaborators: list[str] = []
+            for employee_no in collaborators:
+                resolved = self._resolve_employee_reference(str(employee_no).strip())
+                if resolved is not None:
+                    valid_collaborators.append(resolved)
+            payload["collaborators"] = valid_collaborators
+
+    def _resolve_employee_reference(self, reference: str) -> str | None:
+        user = self.session.get(User, reference)
+        if user is not None and user.status == "active":
+            return user.employee_no
+        statement = (
+            select(User)
+            .where(User.status == "active", User.name == reference)
+            .order_by(User.employee_no)
+            .limit(2)
+        )
+        matches = list(self.session.scalars(statement).all())
+        if len(matches) == 1:
+            return matches[0].employee_no
+        return None
+
+    def _validate_extracted_dates(
+        self,
+        payload: dict[str, object],
+        missing: list[str],
+        low_confidence: list[str],
+    ) -> None:
+        for field in INTAKE_DATE_FIELDS:
+            value = payload.get(field)
+            if value in (None, ""):
+                continue
+            try:
+                datetime.fromisoformat(str(value))
+            except ValueError:
+                payload[field] = None
+                missing.append(field)
+                low_confidence.append(field)
+
+    @staticmethod
+    def _validate_task_weight(
+        payload: dict[str, object],
+        missing: list[str],
+        low_confidence: list[str],
+    ) -> None:
+        value = payload.get("task_weight")
+        if value in (None, ""):
+            return
+        try:
+            weight = int(value)
+        except (TypeError, ValueError):
+            payload["task_weight"] = None
+            missing.append("task_weight")
+            low_confidence.append("task_weight")
+            return
+        if not 1 <= weight <= 5:
+            payload["task_weight"] = None
+            missing.append("task_weight")
+            low_confidence.append("task_weight")
+            return
+        payload["task_weight"] = weight
 
     def _uses_structured_agent_context(self) -> bool:
         return bool(getattr(self.extraction_provider, "uses_structured_context", False))

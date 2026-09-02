@@ -36,7 +36,7 @@ from app.services.business_capabilities import (
     SystemParameterService,
     TaskIntakeService,
 )
-from app.services.errors import PermissionDeniedError
+from app.services.errors import BusinessValidationError, PermissionDeniedError
 
 NOW = datetime(2026, 8, 21, 9, 0, tzinfo=UTC)
 
@@ -236,8 +236,17 @@ def test_task_intake_voice_clarify_and_confirm_create_draft(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     actor = _user("CREATOR")
+    assignee = _user("ASSIGNEE")
+    reviewer = _user("REVIEWER")
     input_id = uuid4()
-    session = RecordingSession(objects={(User, "CREATOR"): actor, (TaskInput, input_id): None})
+    session = RecordingSession(
+        objects={
+            (User, "CREATOR"): actor,
+            (User, "ASSIGNEE"): assignee,
+            (User, "REVIEWER"): reviewer,
+            (TaskInput, input_id): None,
+        }
+    )
     class FailingDecompositionProvider:
         def decompose(self, _extracted):
             raise AssertionError("task creation must not trigger decomposition")
@@ -321,6 +330,150 @@ def test_task_intake_voice_clarify_and_confirm_create_draft(
     assert command.dependencies == ()
     assert command.node_participants == ()
     assert command.extraction_record_ids == (clarified.extraction.extraction_id,)
+
+
+def test_task_intake_accepts_browser_voice_transcript_without_persisting_audio() -> None:
+    actor = _user("CREATOR")
+    assignee = _user("ASSIGNEE")
+    reviewer = _user("REVIEWER")
+    session = RecordingSession(
+        objects={
+            (User, "CREATOR"): actor,
+            (User, "ASSIGNEE"): assignee,
+            (User, "REVIEWER"): reviewer,
+        }
+    )
+    service = TaskIntakeService(
+        session,
+        object,
+        extraction_provider=FakeTaskExtractionProvider(),
+        clock=lambda: NOW,
+    )
+
+    result = service.submit_input(
+        "CREATOR",
+        input_type="voice",
+        raw_text=(
+            "门店上线\nassignee:ASSIGNEE\nreport_to:REVIEWER\n"
+            "deadline:2026-08-30T09:00:00+00:00"
+        ),
+        voice_file_url=None,
+        source_channel="web",
+    )
+
+    assert result.task_input.voice_file_url is None
+    assert result.task_input.asr_text is not None
+    assert result.extraction.extracted_json["main_assignee_employee_no"] == "ASSIGNEE"
+    assert result.extraction.missing_fields == []
+
+
+def test_task_intake_rejects_foreign_retry_and_reuses_owned_latest_extraction() -> None:
+    input_id = uuid4()
+    owner = _user("OWNER")
+    other = _user("OTHER")
+    task_input = TaskInput(
+        input_id=input_id,
+        input_type="text",
+        raw_text="Existing task",
+        source_channel="web",
+        submitted_by_employee_no="OWNER",
+        submitted_at=NOW,
+    )
+    extraction = AIExtractionRecord(
+        extraction_id=uuid4(),
+        input_id=input_id,
+        extracted_json={"task_name": "Existing task"},
+        missing_fields=[],
+        low_confidence_fields=[],
+        confirm_questions=[],
+        confidence_score=Decimal("0.95"),
+    )
+    session = RecordingSession(
+        objects={(User, "OWNER"): owner, (User, "OTHER"): other, (TaskInput, input_id): task_input},
+        scalar_results=[extraction],
+    )
+    service = TaskIntakeService(session, object, clock=lambda: NOW)
+
+    with pytest.raises(PermissionDeniedError, match="actor cannot retry this task input"):
+        service.retry_extraction("OTHER", input_id)
+
+    result = service.get_latest_extraction("OWNER", input_id)
+    assert result.task_input is task_input
+    assert result.extraction is extraction
+
+
+def test_task_intake_validation_prevents_hallucinated_people_and_fuzzy_dates() -> None:
+    actor = _user("CREATOR")
+    session = RecordingSession(objects={(User, "CREATOR"): actor, (User, "VALID"): _user("VALID")})
+
+    class HallucinatingProvider:
+        def extract(self, _text, context=None):
+            return {
+                "extracted_json": {
+                    "task_name": "Task",
+                    "task_description": "Task",
+                    "main_assignee_employee_no": "MISSING",
+                    "report_to_employee_no": "VALID",
+                    "reviewer_employee_no": "VALID",
+                    "deadline": "下周",
+                    "task_weight": 9,
+                    "estimated_hours": "8",
+                    "unknown_field": "ignored",
+                },
+                "missing_fields": [],
+                "low_confidence_fields": [],
+                "confirm_questions": [],
+                "confidence_score": Decimal("0.4"),
+            }
+
+    service = TaskIntakeService(
+        session,
+        object,
+        extraction_provider=HallucinatingProvider(),
+        clock=lambda: NOW,
+    )
+
+    result = service.submit_input(
+        "CREATOR",
+        input_type="text",
+        raw_text="请下周完成任务",
+        voice_file_url=None,
+        source_channel="web",
+    )
+
+    extracted = result.extraction.extracted_json
+    assert extracted["main_assignee_employee_no"] is None
+    assert extracted["deadline"] is None
+    assert extracted["task_weight"] is None
+    assert "estimated_hours" not in extracted
+    assert "unknown_field" not in extracted
+    assert {"main_assignee_employee_no", "deadline", "task_weight"} <= set(
+        result.extraction.low_confidence_fields
+    )
+
+
+def test_task_intake_provider_failures_are_safe_retryable_errors() -> None:
+    session = RecordingSession(objects={(User, "CREATOR"): _user("CREATOR")})
+
+    class RateLimitedProvider:
+        def extract(self, _text, context=None):
+            raise RuntimeError("AI provider HTTP request failed with status 429")
+
+    service = TaskIntakeService(
+        session,
+        object,
+        extraction_provider=RateLimitedProvider(),
+        clock=lambda: NOW,
+    )
+
+    with pytest.raises(BusinessValidationError, match="rate limited"):
+        service.submit_input(
+            "CREATOR",
+            input_type="text",
+            raw_text="Need a task",
+            voice_file_url=None,
+            source_channel="web",
+        )
 
 
 def test_main_assignee_suggests_task_plan_after_acceptance_and_sanitizes_owner() -> None:

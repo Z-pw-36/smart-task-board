@@ -126,7 +126,7 @@ test.describe("DEV-03 Workbench", () => {
       "href",
       "/create/details",
     );
-    await expect(page.getByRole("link", { name: "语音暂不可用，改用文字描述任务" })).toHaveAttribute("href", "/create/details");
+    await expect(page.getByRole("link", { name: "语音描述任务" })).toHaveAttribute("href", "/create/details");
     await expect(page.getByRole("link", { name: "全部任务" })).toHaveAttribute("href", "/tasks");
     await expect(page.getByRole("link", { name: /通知，2 条未读/ })).toHaveAttribute("href", "/notifications");
     await expect(page.getByRole("link", { name: /Workbench responsive route contract/ })).toHaveAttribute("href", `/task/${task.task_id}`);

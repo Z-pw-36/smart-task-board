@@ -42,6 +42,7 @@ from app.schemas.business import (
     SystemParameterUpdateRequest,
     TaskArchiveResponse,
     TaskClarificationRequest,
+    TaskExtractionResponse,
     TaskInputCreateRequest,
     TaskIntakeResponse,
     WorkloadCalculationRequest,
@@ -90,6 +91,10 @@ def _intake_response(result: IntakeResult) -> TaskIntakeResponse:
         confirm_questions=extraction.confirm_questions,
         confidence_score=extraction.confidence_score,
     )
+
+
+def _extraction_response(result: IntakeResult) -> TaskExtractionResponse:
+    return TaskExtractionResponse.model_validate(_intake_response(result))
 
 
 @router.get(
@@ -232,6 +237,32 @@ def submit_task_input(
             source_channel=request.source_channel,
         )
     )
+
+
+@router.post(
+    "/task-inputs/{input_id}/extract",
+    response_model=TaskExtractionResponse,
+    summary="Retry field extraction for an existing task input",
+)
+def retry_task_input_extraction(
+    input_id: UUID,
+    actor: Actor,
+    service: IntakeService,
+) -> TaskExtractionResponse:
+    return _extraction_response(service.retry_extraction(actor, input_id))
+
+
+@router.get(
+    "/task-inputs/{input_id}/extraction",
+    response_model=TaskExtractionResponse,
+    summary="Get the latest field extraction result for a task input",
+)
+def get_task_input_extraction(
+    input_id: UUID,
+    actor: Actor,
+    service: IntakeService,
+) -> TaskExtractionResponse:
+    return _extraction_response(service.get_latest_extraction(actor, input_id))
 
 
 @router.post(

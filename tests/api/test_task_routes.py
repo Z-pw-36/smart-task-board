@@ -933,6 +933,8 @@ def test_openapi_and_swagger_expose_only_approved_contract(route_context) -> Non
         ("POST", "/api/v1/permissions/scopes"),
         ("GET", "/api/v1/permissions/scopes"),
         ("POST", "/api/v1/task-inputs"),
+        ("POST", "/api/v1/task-inputs/{input_id}/extract"),
+        ("GET", "/api/v1/task-inputs/{input_id}/extraction"),
         ("POST", "/api/v1/task-inputs/{input_id}/clarifications"),
         ("POST", "/api/v1/task-inputs/{input_id}/confirm-task"),
         ("POST", "/api/v1/performance-metrics"),
@@ -964,8 +966,8 @@ def test_openapi_and_swagger_expose_only_approved_contract(route_context) -> Non
     assert batch2_operations <= api_operations
     assert wave2_operations <= api_operations
     assert business_operations <= api_operations
-    assert len({path for path in specification["paths"] if path.startswith("/api/v1")}) == 79
-    assert len(api_operations) == 85
+    assert len({path for path in specification["paths"] if path.startswith("/api/v1")}) == 81
+    assert len(api_operations) == 87
 
     security_schemes = specification["components"]["securitySchemes"]
     bearer_schemes = {

@@ -9,6 +9,7 @@ import { Navigate, Outlet, Route, Routes, useLocation, useParams } from "react-r
 
 import { useAuth } from "../auth/useAuth";
 import { TaskDetailPage, TaskReportPage, TaskReviewPage } from "../features/task-detail";
+import { TaskIntakePage } from "../features/task-intake";
 import { TaskOverviewPage } from "../features/task-overview";
 import { WorkbenchPage } from "../features/workbench";
 import { AppShell, RouteLoadingState } from "./AppShell";
@@ -63,7 +64,7 @@ export function AppRoutes() {
         <Route path="/task/:taskId/report" element={<TaskReportPage />} />
         <Route path="/task/:taskId/review" element={<TaskReviewPage />} />
         <Route path="/task/:taskId/decomposition" element={<RoutePlaceholder />} />
-        <Route path="/create/details" element={<RoutePlaceholder />} />
+        <Route path="/create/details" element={<TaskIntakePage />} />
         <Route path="/create/confirm" element={<RoutePlaceholder />} />
         <Route path="/notifications" element={<RoutePlaceholder />} />
         <Route path="/profile" element={<RoutePlaceholder />} />

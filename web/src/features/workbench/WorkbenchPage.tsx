@@ -233,7 +233,7 @@ function QuickTaskInput() {
           className="stb-workbench-voice-link"
           to="/create/details"
           state={{ source: createReturnSource(location, "工作台") }}
-          aria-label="语音暂不可用，改用文字描述任务"
+          aria-label="语音描述任务"
         >
           语音入口
         </Link>
