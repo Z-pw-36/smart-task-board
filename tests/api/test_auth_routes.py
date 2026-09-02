@@ -6,7 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import app.api.dependencies as dependencies
-from app.api.dependencies import get_identity_service
+from app.api.dependencies import get_authentication_service, get_identity_service
 from app.core.config import Settings, get_settings
 from app.core.security import create_access_token
 from app.main import app, create_app
@@ -114,6 +114,52 @@ def test_disabled_prototype_endpoint_returns_not_found(auth_context) -> None:
     )
     response = client.get("/api/v1/auth/prototype-users")
     assert response.status_code == 404
+
+
+def test_login_alias_issues_refresh_token_only_in_controlled_prototype(
+    auth_context,
+) -> None:
+    client, _, _, _ = auth_context
+    auth_service = MagicMock()
+    auth_service.session.get.return_value = SimpleNamespace(status="active")
+    auth_service.issue.return_value = {
+        "access_token": "a",
+        "expires_in": 1800,
+        "refresh_token": "r",
+    }
+    app.dependency_overrides[get_authentication_service] = lambda: auth_service
+    try:
+        response = client.post("/api/v1/auth/login", json={"employee_no": "E-CREATOR"})
+    finally:
+        app.dependency_overrides.pop(get_authentication_service, None)
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "access_token": "a",
+        "token_type": "bearer",
+        "expires_in": 1800,
+        "refresh_token": "r",
+    }
+    auth_service.issue.assert_called_once_with("E-CREATOR", user_agent="testclient")
+
+
+def test_employee_number_token_login_rejects_non_prototype_mode(
+    auth_context,
+) -> None:
+    client, _, _, _ = auth_context
+    settings = _settings(
+        auth_mode="test_header",
+        prototype_auth_enabled=False,
+        allow_test_employee_header=True,
+    )
+    app.dependency_overrides[get_settings] = lambda: settings
+    try:
+        response = client.post("/api/v1/auth/token", json={"employee_no": "E-CREATOR"})
+    finally:
+        app.dependency_overrides[get_settings] = lambda: _settings()
+
+    assert response.status_code == 403
+    assert response.json()["error"]["message"] == "authentication failed"
 
 
 def test_prototype_mode_ignores_employee_header_and_requires_bearer(

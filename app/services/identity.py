@@ -1,16 +1,22 @@
+from datetime import UTC, datetime
+
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings
 from app.core.security import create_access_token
-from app.models import User
+from app.models import User, UserAuthorizedScope
 from app.repositories import UserRepository
 from app.services.errors import EntityNotFoundError, PermissionDeniedError
 
 PROTOTYPE_WARNING = "Prototype authentication is for isolated demo use only."
+EXECUTIVE_ROUTE_ROLES = {"admin", "executive"}
+MANAGE_PERMISSION_ROLES = {"admin"}
 
 
 class IdentityService:
     def __init__(self, session: Session) -> None:
+        self.session = session
         self._users = UserRepository(session)
 
     @staticmethod
@@ -43,3 +49,64 @@ class IdentityService:
         if user is None or user.status != "active":
             raise PermissionDeniedError("current identity is unavailable")
         return user
+
+    def list_active_scopes(self, employee_no: str) -> list[UserAuthorizedScope]:
+        now = datetime.now(UTC)
+        statement = (
+            select(UserAuthorizedScope)
+            .where(
+                UserAuthorizedScope.employee_no == employee_no,
+                UserAuthorizedScope.status == "active",
+                or_(
+                    UserAuthorizedScope.valid_from.is_(None),
+                    UserAuthorizedScope.valid_from <= now,
+                ),
+                or_(
+                    UserAuthorizedScope.valid_to.is_(None),
+                    UserAuthorizedScope.valid_to >= now,
+                ),
+            )
+            .order_by(UserAuthorizedScope.scope_type, UserAuthorizedScope.scope_id)
+        )
+        return list(self.session.scalars(statement).all())
+
+    def current_user_permissions(
+        self, user: User, scopes: list[UserAuthorizedScope]
+    ) -> dict[str, object]:
+        can_access_executive = user.role_type in EXECUTIVE_ROUTE_ROLES
+        can_view_all_demo_data = False
+        for scope in scopes:
+            if scope.scope_type == "all_demo_data":
+                can_view_all_demo_data = True
+            if (
+                scope.permission_type in {"view", "manage", "export"}
+                and scope.scope_type in {"all_demo_data", "department"}
+            ):
+                can_access_executive = True
+
+        capabilities = ["task:read:related"]
+        allowed_routes = [
+            "/workbench",
+            "/tasks",
+            "/task/:taskId",
+            "/task/:taskId/report",
+            "/task/:taskId/review",
+            "/task/:taskId/decomposition",
+            "/create/details",
+            "/create/confirm",
+            "/notifications",
+            "/profile",
+        ]
+        if can_access_executive:
+            capabilities.append("executive:read")
+            allowed_routes.extend(["/executive", "/executive/employee-tasks"])
+        if user.role_type in MANAGE_PERMISSION_ROLES:
+            capabilities.append("permissions:manage")
+
+        return {
+            "can_access_executive": can_access_executive,
+            "can_manage_permissions": user.role_type in MANAGE_PERMISSION_ROLES,
+            "can_view_all_demo_data": can_view_all_demo_data,
+            "allowed_routes": allowed_routes,
+            "capabilities": capabilities,
+        }

@@ -14,11 +14,27 @@ import type { CurrentUser } from "../../../api/types";
 import { jsonResponse, renderPage, taskSummary } from "../../../test/test-utils";
 import { WorkbenchPage } from "../WorkbenchPage";
 
+const employeePermissions = {
+  can_access_executive: false,
+  can_manage_permissions: false,
+  can_view_all_demo_data: false,
+  allowed_routes: ["/workbench", "/tasks", "/create/details", "/create/confirm", "/notifications", "/profile"],
+  capabilities: ["task:read:related"],
+};
+
 const executiveUser: CurrentUser = {
   employee_no: "DEV03_EXECUTIVE",
   name: "Workbench Executive",
   department: null,
-  role_type: "executive",
+  role_type: "employee",
+  roles: ["employee"],
+  permissions: {
+    ...employeePermissions,
+    can_access_executive: true,
+    allowed_routes: [...employeePermissions.allowed_routes, "/executive", "/executive/employee-tasks"],
+    capabilities: ["task:read:related", "executive:read"],
+  },
+  scopes: [],
   auth_mode: "test",
 };
 

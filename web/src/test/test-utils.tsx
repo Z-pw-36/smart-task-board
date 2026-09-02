@@ -11,6 +11,15 @@ export const currentUser: CurrentUser = {
   name: "测试创建人",
   department: { department_id: "11111111-1111-4111-8111-111111111111", department_name: "测试部门" },
   role_type: "employee",
+  roles: ["employee"],
+  permissions: {
+    can_access_executive: false,
+    can_manage_permissions: false,
+    can_view_all_demo_data: false,
+    allowed_routes: ["/workbench", "/tasks", "/create/details", "/create/confirm", "/notifications", "/profile"],
+    capabilities: ["task:read:related"],
+  },
+  scopes: [],
   auth_mode: "prototype",
 };
 

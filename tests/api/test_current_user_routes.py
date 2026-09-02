@@ -40,6 +40,20 @@ def test_current_user_uses_bearer_subject_and_returns_department(monkeypatch) ->
     )
     service = MagicMock()
     service.get_active_user.return_value = user
+    scope = SimpleNamespace(
+        authorized_scope_id=uuid4(),
+        scope_type="department",
+        scope_id=str(department.department_id),
+        permission_type="view",
+    )
+    service.list_active_scopes.return_value = [scope]
+    service.current_user_permissions.return_value = {
+        "can_access_executive": True,
+        "can_manage_permissions": False,
+        "can_view_all_demo_data": False,
+        "allowed_routes": ["/workbench", "/executive"],
+        "capabilities": ["task:read:related", "executive:read"],
+    }
     app.dependency_overrides[get_identity_service] = lambda: service
     app.dependency_overrides[get_settings] = lambda: settings
     token, _ = create_access_token("E-CREATOR", settings)
@@ -58,9 +72,30 @@ def test_current_user_uses_bearer_subject_and_returns_department(monkeypatch) ->
             "department_name": "Demo Department",
         },
         "role_type": "employee",
+        "roles": ["employee"],
+        "permissions": {
+            "can_access_executive": True,
+            "can_manage_permissions": False,
+            "can_view_all_demo_data": False,
+            "allowed_routes": ["/workbench", "/executive"],
+            "capabilities": ["task:read:related", "executive:read"],
+        },
+        "scopes": [
+            {
+                "authorized_scope_id": str(scope.authorized_scope_id),
+                "scope_type": "department",
+                "scope_id": str(department.department_id),
+                "permission_type": "view",
+            }
+        ],
         "auth_mode": "prototype",
     }
+    assert "refresh_token" not in response.text
+    assert "access_token" not in response.text
+    assert "secret" not in response.text.casefold()
     service.get_active_user.assert_called_once_with("E-CREATOR")
+    service.list_active_scopes.assert_called_once_with("E-CREATOR")
+    service.current_user_permissions.assert_called_once_with(user, [scope])
 
 
 def test_current_user_rejects_unknown_or_disabled_identity(monkeypatch) -> None:

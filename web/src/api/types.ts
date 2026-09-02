@@ -80,11 +80,29 @@ export interface AuthTokenResponse {
   refresh_token: string;
 }
 
+export interface CurrentUserScope {
+  authorized_scope_id: string;
+  scope_type: "department" | "user" | "role" | "all_demo_data" | string;
+  scope_id: string | null;
+  permission_type: "view" | "manage" | "export" | string;
+}
+
+export interface CurrentUserPermissions {
+  can_access_executive: boolean;
+  can_manage_permissions: boolean;
+  can_view_all_demo_data: boolean;
+  allowed_routes: string[];
+  capabilities: string[];
+}
+
 export interface CurrentUser {
   employee_no: string;
   name: string;
   department: { department_id: string; department_name: string } | null;
   role_type: string;
+  roles: string[];
+  permissions: CurrentUserPermissions;
+  scopes: CurrentUserScope[];
   auth_mode: string;
 }
 

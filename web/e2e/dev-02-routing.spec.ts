@@ -10,6 +10,7 @@ import { expect, type Page, test } from "@playwright/test";
 const tokenKey = "smarttaskboard.prototype.token";
 
 async function useAuthenticatedRouteFixture(page: Page, roleType: "employee" | "executive" = "employee") {
+  const canAccessExecutive = roleType === "executive";
   const task = {
     task_id: "22222222-2222-4222-8222-222222222222",
     task_no: "DEV02-TASK-001",
@@ -37,6 +38,17 @@ async function useAuthenticatedRouteFixture(page: Page, roleType: "employee" | "
         name: roleType === "executive" ? "Route Executive" : "Route Employee",
         department: null,
         role_type: roleType,
+        roles: [roleType],
+        permissions: {
+          can_access_executive: canAccessExecutive,
+          can_manage_permissions: false,
+          can_view_all_demo_data: false,
+          allowed_routes: canAccessExecutive
+            ? ["/workbench", "/tasks", "/create/details", "/create/confirm", "/notifications", "/profile", "/executive", "/executive/employee-tasks"]
+            : ["/workbench", "/tasks", "/create/details", "/create/confirm", "/notifications", "/profile"],
+          capabilities: canAccessExecutive ? ["task:read:related", "executive:read"] : ["task:read:related"],
+        },
+        scopes: [],
         auth_mode: "test",
       }),
     });

@@ -98,7 +98,7 @@ export function prototypeLogin(employeeNo: string): Promise<LoginResponse> {
 
 export function issueAuthTokens(payload: AuthTokenPayload): Promise<AuthTokenResponse> {
   return apiRequest<AuthTokenResponse>(
-    "/api/v1/auth/token",
+    "/api/v1/auth/login",
     { method: "POST", body: JSON.stringify(payload) },
     { anonymous: true },
   );

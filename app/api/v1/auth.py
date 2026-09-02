@@ -18,6 +18,7 @@ from app.schemas.auth import (
     TokenResponse,
 )
 from app.services.authentication import AuthenticationService
+from app.services.errors import PermissionDeniedError
 from app.services.identity import PROTOTYPE_WARNING, IdentityService
 
 router = APIRouter(prefix="/auth", tags=["prototype-auth"])
@@ -68,6 +69,15 @@ def prototype_login(
     )
 
 
+def _require_controlled_login(settings: Settings, request: PrototypeLoginRequest) -> None:
+    if (
+        settings.auth_mode != "prototype"
+        or request.employee_no not in settings.prototype_employee_nos
+    ):
+        raise PermissionDeniedError("authentication failed")
+
+
+@router.post("/login", response_model=TokenResponse, summary="Issue access and refresh tokens")
 @router.post("/token", response_model=TokenResponse, summary="Issue access and refresh tokens")
 def issue_tokens(
     request: PrototypeLoginRequest,
@@ -75,16 +85,10 @@ def issue_tokens(
     settings: AppSettings,
     user_agent: str | None = Header(default=None),
 ) -> TokenResponse:
-    if settings.auth_mode == "prototype":
-        user = service.session.get(User, request.employee_no)
-        if (
-            user is None
-            or user.status != "active"
-            or request.employee_no not in settings.prototype_employee_nos
-        ):
-            from app.services.errors import PermissionDeniedError
-
-            raise PermissionDeniedError("authentication failed")
+    _require_controlled_login(settings, request)
+    user = service.session.get(User, request.employee_no)
+    if user is None or user.status != "active":
+        raise PermissionDeniedError("authentication failed")
     result = service.issue(request.employee_no, user_agent=user_agent)
     return TokenResponse(**result)
 

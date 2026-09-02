@@ -16,11 +16,22 @@ import { AuthContext, type AuthValue } from "../auth/auth-context";
 import { jsonResponse, taskSummary } from "../test/test-utils";
 import { AppRoutes } from "./router";
 
+const employeePermissions = {
+  can_access_executive: false,
+  can_manage_permissions: false,
+  can_view_all_demo_data: false,
+  allowed_routes: ["/workbench", "/tasks", "/create/details", "/create/confirm", "/notifications", "/profile"],
+  capabilities: ["task:read:related"],
+};
+
 const employeeUser: CurrentUser = {
   employee_no: "DEV02_EMPLOYEE",
   name: "Route Employee",
   department: null,
   role_type: "employee",
+  roles: ["employee"],
+  permissions: employeePermissions,
+  scopes: [],
   auth_mode: "test",
 };
 
@@ -28,7 +39,22 @@ const executiveUser: CurrentUser = {
   ...employeeUser,
   employee_no: "DEV02_EXECUTIVE",
   name: "Route Executive",
+  role_type: "employee",
+  roles: ["employee"],
+  permissions: {
+    ...employeePermissions,
+    can_access_executive: true,
+    allowed_routes: [...employeePermissions.allowed_routes, "/executive", "/executive/employee-tasks"],
+    capabilities: ["task:read:related", "executive:read"],
+  },
+};
+
+const roleOnlyExecutiveUser: CurrentUser = {
+  ...employeeUser,
+  employee_no: "DEV02_ROLE_ONLY",
+  name: "Role Only Executive",
   role_type: "executive",
+  roles: ["executive"],
 };
 
 function LocationProbe() {
@@ -251,6 +277,12 @@ describe("DEV-02 target router", () => {
 
     expect(screen.getByRole("alert")).toHaveTextContent("无权限访问");
     expect(screen.getByRole("button", { name: /安全返回/ })).toBeInTheDocument();
+  });
+
+  it("does not trust role_type without backend permission projection", () => {
+    renderRoutes({ route: "/executive", user: roleOnlyExecutiveUser });
+
+    expect(screen.getByRole("alert")).toHaveTextContent("无权限访问");
   });
 
   it("redirects legacy root to workbench without a loop", async () => {

@@ -153,7 +153,7 @@ export const shellNavigationItems: ShellNavigationItem[] = [
 ];
 
 export function canAccessExecutiveRoutes(user: CurrentUser | null): boolean {
-  return user?.role_type === "executive";
+  return user?.permissions.can_access_executive === true;
 }
 
 export function visibleNavigationItems(user: CurrentUser | null): ShellNavigationItem[] {

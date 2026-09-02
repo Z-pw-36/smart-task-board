@@ -1,4 +1,5 @@
 const TOKEN_KEY = "smarttaskboard.prototype.token";
+const REFRESH_TOKEN_KEY = "smarttaskboard.auth.refresh-token";
 const AUTH_EXPIRED_EVENT = "smarttaskboard:auth-expired";
 
 export class ApiError extends Error {
@@ -14,8 +15,17 @@ export class ApiError extends Error {
 
 export const session = {
   getToken: () => sessionStorage.getItem(TOKEN_KEY),
+  getRefreshToken: () => sessionStorage.getItem(REFRESH_TOKEN_KEY),
   setToken: (token: string) => sessionStorage.setItem(TOKEN_KEY, token),
-  clear: () => sessionStorage.removeItem(TOKEN_KEY),
+  setTokens: (accessToken: string, refreshToken?: string) => {
+    sessionStorage.setItem(TOKEN_KEY, accessToken);
+    if (refreshToken) sessionStorage.setItem(REFRESH_TOKEN_KEY, refreshToken);
+  },
+  clearAccessToken: () => sessionStorage.removeItem(TOKEN_KEY),
+  clear: () => {
+    sessionStorage.removeItem(TOKEN_KEY);
+    sessionStorage.removeItem(REFRESH_TOKEN_KEY);
+  },
 };
 
 export const authExpiredEvent = AUTH_EXPIRED_EVENT;

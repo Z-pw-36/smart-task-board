@@ -8,9 +8,10 @@
 import { Link, useLocation, useNavigate, createSearchParams } from "react-router-dom";
 
 import type { TaskSummary } from "../../api/types";
+import { canAccessExecutiveRoutes } from "../../app/navigation";
+import { createReturnSource } from "../../app/return-state";
 import { useAuth } from "../../auth/useAuth";
 import { Badge, Button, Card, EmptyState, ErrorState, Progress, Skeleton, Typography } from "../../shared/components";
-import { createReturnSource } from "../../app/return-state";
 import {
   type WorkbenchQuadrant,
   type WorkbenchStatusFilter,
@@ -330,7 +331,7 @@ export function WorkbenchPage() {
             workloadScore={workloadScore}
           />
           <QuickTaskInput />
-          {user?.role_type === "executive" && (
+          {canAccessExecutiveRoutes(user) && (
             <Link className="stb-workbench-executive" to="/executive" state={{ source: createReturnSource(location, "工作台") }}>
               团队态势
             </Link>

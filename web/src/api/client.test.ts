@@ -5,7 +5,7 @@ import { jsonResponse } from "../test/test-utils";
 
 describe("apiRequest", () => {
   it("attaches the prototype Bearer token without logging it", async () => {
-    session.setToken("secret-prototype-token");
+    session.setTokens("secret-prototype-token", "secret-refresh-token");
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ ok: true }));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -16,7 +16,7 @@ describe("apiRequest", () => {
   });
 
   it("clears the session and emits auth expiry on 401", async () => {
-    session.setToken("expired-token");
+    session.setTokens("expired-token", "expired-refresh-token");
     const expired = vi.fn();
     window.addEventListener(authExpiredEvent, expired);
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({ error: { code: "authentication_required", message: "expired", details: {} } }, 401)));
@@ -24,6 +24,7 @@ describe("apiRequest", () => {
     await expect(apiRequest("/api/v1/me")).rejects.toBeInstanceOf(ApiError);
 
     expect(session.getToken()).toBeNull();
+    expect(session.getRefreshToken()).toBeNull();
     expect(expired).toHaveBeenCalledOnce();
     window.removeEventListener(authExpiredEvent, expired);
   });

@@ -1,4 +1,5 @@
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import jwt
@@ -117,6 +118,43 @@ def test_prototype_endpoints_are_unavailable_when_mode_is_disabled() -> None:
     )
     with pytest.raises(EntityNotFoundError):
         service.list_prototype_users(settings)
+
+
+def test_current_user_permissions_are_backend_projection() -> None:
+    service = IdentityService(MagicMock())
+    employee = User(
+        employee_no="E-EMPLOYEE",
+        name="Employee",
+        role_type="employee",
+        status="active",
+    )
+    executive = User(
+        employee_no="E-EXECUTIVE",
+        name="Executive",
+        role_type="executive",
+        status="active",
+    )
+    admin = User(employee_no="E-ADMIN", name="Admin", role_type="admin", status="active")
+    department_scope = SimpleNamespace(
+        scope_type="department",
+        scope_id="D-1",
+        permission_type="view",
+    )
+    all_data_scope = SimpleNamespace(
+        scope_type="all_demo_data",
+        scope_id=None,
+        permission_type="view",
+    )
+
+    assert service.current_user_permissions(employee, [])["can_access_executive"] is False
+    assert service.current_user_permissions(executive, [])["can_access_executive"] is True
+    assert service.current_user_permissions(employee, [department_scope])[
+        "can_access_executive"
+    ] is True
+    assert service.current_user_permissions(employee, [all_data_scope])[
+        "can_view_all_demo_data"
+    ] is True
+    assert service.current_user_permissions(admin, [])["can_manage_permissions"] is True
 
 
 def test_production_rejects_prototype_and_test_header_modes() -> None:

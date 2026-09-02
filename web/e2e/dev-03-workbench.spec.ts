@@ -29,6 +29,7 @@ const task = {
 };
 
 async function useWorkbenchFixture(page: Page, roleType: "employee" | "executive" = "employee") {
+  const canAccessExecutive = roleType === "executive";
   await page.route("**/api/v1/me", async (route) => {
     await route.fulfill({
       status: 200,
@@ -38,6 +39,17 @@ async function useWorkbenchFixture(page: Page, roleType: "employee" | "executive
         name: roleType === "executive" ? "Workbench Executive" : "Workbench Employee",
         department: null,
         role_type: roleType,
+        roles: [roleType],
+        permissions: {
+          can_access_executive: canAccessExecutive,
+          can_manage_permissions: false,
+          can_view_all_demo_data: false,
+          allowed_routes: canAccessExecutive
+            ? ["/workbench", "/tasks", "/create/details", "/create/confirm", "/notifications", "/profile", "/executive", "/executive/employee-tasks"]
+            : ["/workbench", "/tasks", "/create/details", "/create/confirm", "/notifications", "/profile"],
+          capabilities: canAccessExecutive ? ["task:read:related", "executive:read"] : ["task:read:related"],
+        },
+        scopes: [],
         auth_mode: "test",
       }),
     });
