@@ -7,6 +7,8 @@ from sqlalchemy.orm import Session
 
 from app.models import (
     AIExtractionRecord,
+    OperationLog,
+    PerformanceMetric,
     Task,
     TaskChangeRequest,
     TaskCompletionReview,
@@ -14,13 +16,16 @@ from app.models import (
     TaskNodeDependency,
     TaskNodeParticipant,
     TaskParticipant,
+    TaskPerformanceMatch,
     TaskStatusLog,
 )
 from app.repositories import (
     AIExtractionRecordRepository,
+    OperationLogRepository,
     TaskChangeRequestRepository,
     TaskCompletionReviewRepository,
     TaskNodeRepository,
+    TaskPerformanceMatchRepository,
     TaskRepository,
     TaskStatusLogRepository,
 )
@@ -43,6 +48,8 @@ class TaskQueryService:
         self._completion_reviews = TaskCompletionReviewRepository(session)
         self._change_requests = TaskChangeRequestRepository(session)
         self._extractions = AIExtractionRecordRepository(session)
+        self._performance_matches = TaskPerformanceMatchRepository(session)
+        self._operation_logs = OperationLogRepository(session)
 
     def get_task_detail(self, task_id: UUID, actor_employee_no: str) -> dict[str, Any]:
         task, participants, nodes, dependencies, node_participants = self._aggregate(
@@ -57,6 +64,18 @@ class TaskQueryService:
             node_participants=[self._node_participant_dict(item) for item in node_participants],
             ai_extraction_records=[
                 self._extraction_dict(item) for item in self._extractions.list_by_task_id(task_id)
+            ],
+            performance_matches=[
+                self._performance_match_dict(match, metric)
+                for match, metric in self._performance_matches.list_confirmed_by_task_id(task_id)
+            ],
+            operation_logs=[
+                self._operation_log_dict(item)
+                for item in self._operation_logs.list_by_object(
+                    object_type="task",
+                    object_id=task_id,
+                    limit=50,
+                )
             ],
             change_requests=[
                 self._change_request_dict(item)
@@ -391,6 +410,45 @@ class TaskQueryService:
             "submitted_at",
             "reviewed_at",
             "is_legacy_import",
+        )
+        return {field: getattr(item, field) for field in fields}
+
+    @staticmethod
+    def _performance_match_dict(
+        match: TaskPerformanceMatch,
+        metric: PerformanceMetric,
+    ) -> dict[str, Any]:
+        return {
+            "performance_match_id": match.performance_match_id,
+            "task_id": match.task_id,
+            "metric_id": match.metric_id,
+            "metric_type": metric.metric_type,
+            "metric_name": metric.metric_name,
+            "period": metric.period,
+            "business_unit": metric.business_unit,
+            "definition_formula": metric.definition_formula,
+            "total_score": match.total_score,
+            "match_level": match.match_level,
+            "match_reason": match.match_reason,
+            "is_confirmed": match.is_confirmed,
+            "confirmed_by_employee_no": match.confirmed_by_employee_no,
+            "confirmed_at": match.confirmed_at,
+        }
+
+    @staticmethod
+    def _operation_log_dict(item: OperationLog) -> dict[str, Any]:
+        fields = (
+            "operation_log_id",
+            "request_id",
+            "operator_employee_no",
+            "action",
+            "object_type",
+            "object_id",
+            "before_data",
+            "after_data",
+            "result",
+            "error_message",
+            "created_at",
         )
         return {field: getattr(item, field) for field in fields}
 

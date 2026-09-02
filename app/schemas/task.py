@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Annotated
+from typing import Annotated, Any
 from uuid import UUID
 
 from pydantic import Field, StringConstraints, field_validator, model_validator
@@ -125,6 +125,37 @@ class AIExtractionRecordSummaryResponse(StrictSchema):
     confirmed_at: datetime | None
 
 
+class TaskPerformanceMatchSummaryResponse(StrictSchema):
+    performance_match_id: UUID
+    task_id: UUID
+    metric_id: UUID
+    metric_type: str
+    metric_name: str
+    period: str | None
+    business_unit: str | None
+    definition_formula: str | None
+    total_score: DecimalString
+    match_level: str
+    match_reason: str | None
+    is_confirmed: bool
+    confirmed_by_employee_no: str | None
+    confirmed_at: datetime | None
+
+
+class TaskOperationLogSummaryResponse(StrictSchema):
+    operation_log_id: UUID
+    request_id: str | None
+    operator_employee_no: str | None
+    action: str
+    object_type: str
+    object_id: str
+    before_data: dict[str, Any] | None
+    after_data: dict[str, Any] | None
+    result: str
+    error_message: str | None
+    created_at: datetime
+
+
 class TaskDetailResponse(StrictSchema):
     task_id: UUID
     task_no: str | None
@@ -165,6 +196,8 @@ class TaskDetailResponse(StrictSchema):
     dependencies: list[TaskNodeDependencyResponse]
     node_participants: list[TaskNodeParticipantResponse]
     ai_extraction_records: list[AIExtractionRecordSummaryResponse]
+    performance_matches: list[TaskPerformanceMatchSummaryResponse] = Field(default_factory=list)
+    operation_logs: list[TaskOperationLogSummaryResponse] = Field(default_factory=list)
     change_requests: list[TaskChangeRequestResponse] = Field(default_factory=list)
 
 

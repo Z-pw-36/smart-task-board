@@ -429,6 +429,37 @@ export interface TaskCompletionReviewPage {
   total: number;
 }
 
+export interface TaskPerformanceMatchSummary {
+  performance_match_id: string;
+  task_id: string;
+  metric_id: string;
+  metric_type: string;
+  metric_name: string;
+  period: string | null;
+  business_unit: string | null;
+  definition_formula: string | null;
+  total_score: string;
+  match_level: string;
+  match_reason: string | null;
+  is_confirmed: boolean;
+  confirmed_by_employee_no: string | null;
+  confirmed_at: string | null;
+}
+
+export interface TaskOperationLogSummary {
+  operation_log_id: string;
+  request_id: string | null;
+  operator_employee_no: string | null;
+  action: string;
+  object_type: string;
+  object_id: string;
+  before_data: Record<string, unknown> | null;
+  after_data: Record<string, unknown> | null;
+  result: string;
+  error_message: string | null;
+  created_at: string;
+}
+
 export interface TaskChangeRequest {
   change_request_id: string;
   task_id: string;
@@ -524,6 +555,8 @@ export interface TaskDetail {
     employee_no: string;
     participant_role: string;
   }>;
+  performance_matches?: TaskPerformanceMatchSummary[];
+  operation_logs?: TaskOperationLogSummary[];
   change_requests: TaskChangeRequest[];
   confirmed_at?: string | null;
   sent_at?: string | null;

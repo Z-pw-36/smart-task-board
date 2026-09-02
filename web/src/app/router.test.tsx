@@ -65,10 +65,13 @@ function renderRoutes({
   );
 }
 
-const ordinaryTargetRoutes = [
-  ["/task/DEV02-TASK-001", "任务详情"],
-  ["/task/DEV02-TASK-001/report", "提交进度汇报"],
-  ["/task/DEV02-TASK-001/review", "任务验收"],
+const formalTaskRoutes = [
+  ["/task/22222222-2222-4222-8222-222222222222", "task-detail-page"],
+  ["/task/22222222-2222-4222-8222-222222222222/report", "task-report-page"],
+  ["/task/22222222-2222-4222-8222-222222222222/review", "task-review-page"],
+] as const;
+
+const placeholderTargetRoutes = [
   ["/task/DEV02-TASK-001/decomposition", "AI 拆解状态"],
   ["/create/details", "创建任务"],
   ["/create/confirm", "确认发送"],
@@ -106,6 +109,62 @@ function mockWorkbenchFetch() {
   }));
 }
 
+function mockTaskDetailFetch() {
+  vi.stubGlobal("fetch", vi.fn(async (url: string | URL | Request) => {
+    const value = new URL(String(url)).pathname;
+    const taskId = "22222222-2222-4222-8222-222222222222";
+    if (value === `/api/v1/tasks/${taskId}`) {
+      return jsonResponse({
+        task_id: taskId,
+        task_no: "DEV05-TASK-ROUTE",
+        task_name: "Route detail task",
+        task_description: "Route detail",
+        task_goal: "Route detail goal",
+        task_source: "Route test",
+        creator_employee_no: "DEV02_CREATOR",
+        main_assignee_employee_no: "DEV02_EMPLOYEE",
+        report_to_employee_no: null,
+        report_to_level: null,
+        reviewer_employee_no: "DEV02_REVIEWER",
+        department_id: null,
+        status: "in_progress",
+        start_time: null,
+        deadline: null,
+        estimated_hours: null,
+        actual_hours: null,
+        task_weight: 3,
+        deliverable: null,
+        acceptance_criteria: null,
+        is_urgent: false,
+        report_cycle: null,
+        cancel_reason: null,
+        withdraw_reason: null,
+        close_reason: null,
+        merged_into_task_id: null,
+        task_version: 1,
+        created_at: "2026-09-01T08:00:00Z",
+        updated_at: "2026-09-01T09:00:00Z",
+        participants: [],
+        nodes: [],
+        dependencies: [],
+        node_participants: [],
+        ai_extraction_records: [],
+        change_requests: [],
+      });
+    }
+    if (value === `/api/v1/tasks/${taskId}/available-actions`) {
+      return jsonResponse({ task_id: taskId, task_version: 1, allowed_actions: [], nodes: [] });
+    }
+    if (value === `/api/v1/tasks/${taskId}/status-logs`) return jsonResponse({ items: [], limit: 100, offset: 0, total: 0 });
+    if (value === `/api/v1/tasks/${taskId}/progress-reports`) return jsonResponse({ items: [], limit: 50, offset: 0, total: 0 });
+    if (value === `/api/v1/tasks/${taskId}/issues`) return jsonResponse({ items: [], limit: 50, offset: 0, total: 0 });
+    if (value === `/api/v1/tasks/${taskId}/completion-reviews`) return jsonResponse({ items: [], limit: 20, offset: 0, total: 0 });
+    if (value.includes("/dashboard/summary")) return jsonResponse({ recent_tasks: [], priority_items: [] });
+    if (value === "/api/v1/tasks") return jsonResponse({ items: [taskSummary], limit: 8, offset: 0, total: 1 });
+    return jsonResponse({}, 404);
+  }));
+}
+
 describe("DEV-02 target router", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
@@ -136,7 +195,16 @@ describe("DEV-02 target router", () => {
     expect(screen.getByRole("heading", { name: "任务信息管理" })).toBeInTheDocument();
   });
 
-  it.each(ordinaryTargetRoutes)("recognizes %s and renders the protected shell", (route, title) => {
+  it.each(formalTaskRoutes)("recognizes %s and renders the DEV-05 page", async (route, testId) => {
+    mockTaskDetailFetch();
+    renderRoutes({ route });
+
+    expect(screen.getByTestId("app-shell")).toBeInTheDocument();
+    expect(await screen.findByTestId(testId)).toBeInTheDocument();
+    expect(screen.queryByTestId("route-contract")).not.toBeInTheDocument();
+  });
+
+  it.each(placeholderTargetRoutes)("recognizes %s and renders the protected shell placeholder", (route, title) => {
     renderRoutes({ route });
 
     expect(screen.getByTestId("app-shell")).toBeInTheDocument();
@@ -194,10 +262,11 @@ describe("DEV-02 target router", () => {
   });
 
   it("redirects legacy task detail URLs and preserves taskId", async () => {
+    mockTaskDetailFetch();
     renderRoutes({ route: "/tasks/DEV02-TASK-789" });
 
     await waitFor(() => expect(screen.getByTestId("location")).toHaveTextContent("/task/DEV02-TASK-789"));
-    expect(screen.getByText("DEV02-TASK-789")).toBeInTheDocument();
+    expect(await screen.findByText("任务不存在")).toBeInTheDocument();
   });
 
   it("does not expose /create/nodes as a production route", () => {
@@ -214,19 +283,23 @@ describe("DEV-02 target router", () => {
   });
 
   it("uses explicit return source state before route fallback", async () => {
+    mockTaskDetailFetch();
     renderRoutes({
-      route: "/task/DEV02-TASK-002",
+      route: "/task/22222222-2222-4222-8222-222222222222",
       state: { source: { pathname: "/notifications", search: "?type=task" } },
     });
 
-    await userEvent.click(screen.getByRole("button", { name: "返回" }));
+    await screen.findByTestId("task-detail-page");
+    await userEvent.click(screen.getAllByRole("button", { name: "返回" }).at(-1)!);
     await waitFor(() => expect(screen.getByTestId("location")).toHaveTextContent("/notifications?type=task"));
   });
 
   it("uses a route-specific safe fallback when no source exists", async () => {
-    renderRoutes({ route: "/task/DEV02-TASK-003" });
+    mockTaskDetailFetch();
+    renderRoutes({ route: "/task/22222222-2222-4222-8222-222222222222" });
 
-    await userEvent.click(screen.getByRole("button", { name: "返回" }));
+    await screen.findByTestId("task-detail-page");
+    await userEvent.click(screen.getAllByRole("button", { name: "返回" }).at(-1)!);
     await waitFor(() => expect(screen.getByTestId("location")).toHaveTextContent("/tasks"));
   });
 

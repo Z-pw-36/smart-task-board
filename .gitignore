@@ -14,6 +14,8 @@ dist/
 web/node_modules/
 web/dist/
 web/coverage/
+test-results/
+web/test-results/
 web/.env
 web/.env.*
 !web/.env.example

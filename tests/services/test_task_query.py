@@ -6,11 +6,14 @@ import pytest
 from sqlalchemy.orm import Session
 
 from app.models import (
+    OperationLog,
+    PerformanceMetric,
     Task,
     TaskCompletionReview,
     TaskNode,
     TaskNodeParticipant,
     TaskParticipant,
+    TaskPerformanceMatch,
     TaskStatusLog,
 )
 from app.services.errors import BusinessValidationError, EntityNotFoundError, PermissionDeniedError
@@ -49,6 +52,8 @@ def _service() -> tuple[TaskQueryService, MagicMock, Task, TaskNode]:
     service._logs = MagicMock()  # noqa: SLF001
     service._extractions = MagicMock()  # noqa: SLF001
     service._completion_reviews = MagicMock()  # noqa: SLF001
+    service._performance_matches = MagicMock()  # noqa: SLF001
+    service._operation_logs = MagicMock()  # noqa: SLF001
     service._tasks.get_by_id.return_value = task  # noqa: SLF001
     service._tasks.is_related.side_effect = (  # noqa: SLF001
         lambda _task_id, actor: actor != "OUTSIDER"
@@ -75,6 +80,8 @@ def _service() -> tuple[TaskQueryService, MagicMock, Task, TaskNode]:
     ]
     service._nodes.get_node.return_value = node  # noqa: SLF001
     service._extractions.list_by_task_id.return_value = []  # noqa: SLF001
+    service._performance_matches.list_confirmed_by_task_id.return_value = []  # noqa: SLF001
+    service._operation_logs.list_by_object.return_value = []  # noqa: SLF001
     return service, session, task, node
 
 
@@ -109,6 +116,66 @@ def test_unrelated_actor_and_missing_task_are_rejected() -> None:
     service._tasks.get_by_id.return_value = None  # noqa: SLF001
     with pytest.raises(EntityNotFoundError):
         service.get_task_detail(task.task_id, "CREATOR")
+
+
+def test_task_detail_includes_read_only_performance_and_operation_logs() -> None:
+    service, session, task, _ = _service()
+    metric = PerformanceMetric(
+        metric_id=uuid4(),
+        metric_type="quality",
+        metric_name="Release quality",
+        period="2026-Q3",
+        business_unit="Product",
+        definition_formula="accepted defects <= target",
+        status="active",
+        created_at=NOW,
+        updated_at=NOW,
+    )
+    match = TaskPerformanceMatch(
+        performance_match_id=uuid4(),
+        task_id=task.task_id,
+        metric_id=metric.metric_id,
+        total_score=90,
+        match_level="strong",
+        match_reason="confirmed business goal",
+        is_confirmed=True,
+        confirmed_by_employee_no="CREATOR",
+        confirmed_at=NOW,
+        created_at=NOW,
+        updated_at=NOW,
+    )
+    operation = OperationLog(
+        operation_log_id=uuid4(),
+        request_id="REQ-DEV05",
+        operator_employee_no="CREATOR",
+        action="kpi_match_confirmed",
+        object_type="task",
+        object_id=str(task.task_id),
+        before_data=None,
+        after_data={"is_confirmed": True},
+        result="success",
+        created_at=NOW,
+    )
+    service._performance_matches.list_confirmed_by_task_id.return_value = [  # noqa: SLF001
+        (match, metric)
+    ]
+    service._operation_logs.list_by_object.return_value = [operation]  # noqa: SLF001
+
+    result = service.get_task_detail(task.task_id, "CREATOR")
+
+    assert result["performance_matches"][0]["metric_name"] == "Release quality"
+    assert result["performance_matches"][0]["is_confirmed"] is True
+    assert result["operation_logs"][0]["action"] == "kpi_match_confirmed"
+    service._performance_matches.list_confirmed_by_task_id.assert_called_once_with(  # noqa: SLF001
+        task.task_id
+    )
+    service._operation_logs.list_by_object.assert_called_once_with(  # noqa: SLF001
+        object_type="task",
+        object_id=task.task_id,
+        limit=50,
+    )
+    session.commit.assert_not_called()
+    session.flush.assert_not_called()
 
 
 def test_node_must_belong_to_task() -> None:

@@ -8,6 +8,7 @@
 import { Navigate, Outlet, Route, Routes, useLocation, useParams } from "react-router-dom";
 
 import { useAuth } from "../auth/useAuth";
+import { TaskDetailPage, TaskReportPage, TaskReviewPage } from "../features/task-detail";
 import { TaskOverviewPage } from "../features/task-overview";
 import { WorkbenchPage } from "../features/workbench";
 import { AppShell, RouteLoadingState } from "./AppShell";
@@ -58,9 +59,9 @@ export function AppRoutes() {
         </Route>
         <Route path="/tasks" element={<TaskOverviewPage />} />
         <Route path="/tasks/:taskId" element={<LegacyTaskRedirect />} />
-        <Route path="/task/:taskId" element={<RoutePlaceholder />} />
-        <Route path="/task/:taskId/report" element={<RoutePlaceholder />} />
-        <Route path="/task/:taskId/review" element={<RoutePlaceholder />} />
+        <Route path="/task/:taskId" element={<TaskDetailPage />} />
+        <Route path="/task/:taskId/report" element={<TaskReportPage />} />
+        <Route path="/task/:taskId/review" element={<TaskReviewPage />} />
         <Route path="/task/:taskId/decomposition" element={<RoutePlaceholder />} />
         <Route path="/create/details" element={<RoutePlaceholder />} />
         <Route path="/create/confirm" element={<RoutePlaceholder />} />
